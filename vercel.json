@@ -1,6 +1,29 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index?__rumi_path=:path*"
+    },
+    {
+      "source": "/login",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/app",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/gioi-thieu",
+      "destination": "/gioi-thieu.html"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -12,13 +35,7 @@
       ]
     },
     {
-      "source": "/",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
-      ]
-    },
-    {
-      "source": "/app.js",
+      "source": "/(login|app|index.html|app.js)",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
       ]

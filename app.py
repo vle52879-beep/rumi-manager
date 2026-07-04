@@ -9,6 +9,7 @@ import html
 import os
 import threading
 from io import BytesIO
+from urllib.parse import urlencode
 
 from flask import Flask, Response, request
 
@@ -79,10 +80,23 @@ def _client_ip() -> str:
     return (forwarded.split(",", 1)[0].strip() if forwarded else request.remote_addr) or "0.0.0.0"
 
 
-def _dispatch_core() -> Response:
+def _dispatch_core(path_override: str | None = None) -> Response:
     method = request.method.upper()
     body = request.get_data(cache=False) or b""
-    handler = InProcessRumiHandler(method, request.full_path.rstrip("?") or request.path, request.headers, body, _client_ip())
+
+    # Vercel rewrites every /api/* request to /api/index and passes the
+    # original suffix in __rumi_path. Remove that internal parameter before
+    # forwarding the request to the existing RUMI handler.
+    forwarded_path = path_override or request.path
+    query_items = []
+    for key in request.args:
+        if key == "__rumi_path":
+            continue
+        for value in request.args.getlist(key):
+            query_items.append((key, value))
+    forwarded_query = urlencode(query_items, doseq=True)
+    handler_path = forwarded_path + (("?" + forwarded_query) if forwarded_query else "")
+    handler = InProcessRumiHandler(method, handler_path, request.headers, body, _client_ip())
 
     if method == "GET" or method == "HEAD":
         handler.do_GET()
@@ -140,7 +154,9 @@ def api(path: str):
             content_type="application/json; charset=utf-8",
             headers={"Cache-Control": "no-store"},
         )
-    return _dispatch_core()
+    original_suffix = (request.args.get("__rumi_path") or "").strip("/")
+    original_path = f"/api/{original_suffix}" if original_suffix else "/api"
+    return _dispatch_core(original_path)
 
 
 # Fallback for local Flask/vercel dev. In production, files in public/ are served

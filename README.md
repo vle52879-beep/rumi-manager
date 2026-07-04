@@ -1,4 +1,4 @@
-# RUMI Manager v4.4 — Vercel + Supabase
+# RUMI Manager v4.5 — Vercel + Supabase
 
 Bản này triển khai giống IC3 SmartClass: mã nguồn trên GitHub, tự động deploy lên
 Vercel và dùng chung dự án Supabase nhưng chỉ thao tác các bảng có tiền tố
@@ -27,3 +27,8 @@ Xem `DEPLOY_VERCEL.md`.
 - `app.py`: Flask/WSGI adapter cho toàn bộ API.
 - `server.py`: nghiệp vụ, phân quyền và kết nối Supabase.
 - `vercel.json`, `pyproject.toml`, `requirements.txt`: cấu hình triển khai.
+
+
+## Sửa lỗi build Vercel v4.5
+
+Đã bỏ cấu hình `functions.app.py` không hợp lệ. Vercel tự nhận Flask app từ `app.py` và `pyproject.toml`.
