@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RUMI Manager v5.3 OPERATIONS — fixed admin account, employee CRUD, roles, scheduling and GPS.
+"""RUMI Manager v5.3.2 EXCEL — fixed admin account, employee CRUD, roles, scheduling and GPS.
 
 Python standard library only. The Supabase secret key stays in this backend and
 is never sent to the browser. Every database object used by this app starts
@@ -26,6 +26,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
+
+from excel_export import build_schedule_week_xlsx
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
@@ -491,7 +493,7 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/5.3"
+    server_version = "RUMI/5.3.2"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -515,6 +517,18 @@ class RumiHandler(BaseHTTPRequestHandler):
 
     def fail(self, message, status=400):
         self.send_json({"ok": False, "message": message}, status)
+
+
+    def send_binary(self, payload: bytes, content_type: str, filename: str):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.end_headers()
+        self.wfile.write(payload)
 
     def parse_json(self) -> dict:
         length = integer(self.headers.get("Content-Length", "0"))
@@ -1133,7 +1147,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 employees=lambda: SB.select(TABLES["employees"], limit=1, columns="id"),
                 payroll_runs=lambda: SB.select(TABLES["payroll_runs"], limit=1, columns="id"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "5.3", "operations_ready": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "5.3.2", "operations_ready": True, "schedule_excel": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -1279,6 +1293,38 @@ class RumiHandler(BaseHTTPRequestHandler):
                 item["shift"] = shifts.get(integer(item.get("shift_id")))
                 output.append(item)
             return self.ok(output)
+
+        if path == "/api/export/schedule-week.xlsx":
+            start_value = parse_date(query.get("start", [""])[0], "Ngày bắt đầu")
+            end_value = parse_date(query.get("end", [""])[0], "Ngày kết thúc")
+            start_day = datetime.strptime(start_value, "%Y-%m-%d").date()
+            end_day = datetime.strptime(end_value, "%Y-%m-%d").date()
+            if end_day < start_day or (end_day - start_day).days > 6:
+                raise APIError("File Excel chỉ xuất tối đa 7 ngày")
+            filters = {"shift_date": f"gte.{start_value}", "and": f"(shift_date.lte.{end_value})"}
+            location_id = integer(query.get("location_id", ["0"])[0])
+            if user.get("role") == "employee":
+                filters["employee_id"] = f"eq.{user['employee_id']}"
+            elif location_id:
+                filters["location_id"] = f"eq.{location_id}"
+            shifts = self.enriched_shifts(SB.select(TABLES["shifts"], filters=filters, order="shift_date.asc,start_time.asc"))
+            if user.get("role") == "admin":
+                employees = SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, order="name.asc", columns="id,code,name,role,status")
+            else:
+                employees = [user.get("employee") or {}]
+            location_label = "Tất cả cửa hàng"
+            if location_id and user.get("role") == "admin":
+                location_rows = SB.select(TABLES["locations"], filters={"id": f"eq.{location_id}"}, limit=1, columns="id,name")
+                location_label = location_rows[0].get("name", "Cửa hàng") if location_rows else "Cửa hàng"
+            elif user.get("role") == "employee":
+                location_label = "Lịch cá nhân"
+            workbook = build_schedule_week_xlsx(
+                shifts, employees, start_value, end_value, location_label,
+                user["profile"].get("name") or user.get("username") or "RUMI",
+            )
+            filename = f"RUMI_lich_lam_tuan_{start_value}.xlsx"
+            self.audit(user, "export", "schedule_week", start_value, {"end": end_value, "location_id": location_id, "shift_count": len(shifts)})
+            return self.send_binary(workbook, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename)
 
         if path == "/api/shifts":
             filters = {}
@@ -2018,7 +2064,7 @@ def main() -> None:
         raise SystemExit(2) from exc
     server = ThreadingHTTPServer((host, port), RumiHandler)
     print("=" * 68)
-    print("RUMI Manager v5.3 OPERATIONS đang chạy")
+    print("RUMI Manager v5.3.2 EXCEL đang chạy")
     print(f"Mở trên máy này: http://localhost:{port}")
     print(f"Tài khoản admin: {ADMIN_USERNAME}")
     if os.environ.get("RUMI_ADMIN_PASSWORD"):

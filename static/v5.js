@@ -4,7 +4,7 @@
    keeps all business rules on the Python/PostgreSQL backend. */
 
 window.RumiV5 = (() => {
-  const VERSION = '5.3.1';
+  const VERSION = '5.3.2';
   const pageNode = () => document.querySelector('#page');
   const localISO = (date) => {
     const d = new Date(date);
@@ -71,6 +71,9 @@ window.RumiV5 = (() => {
   const exportButton = (kind, label = 'Xuất CSV') => `<button class="btn secondary" data-v5-action="export" data-export="${kind}">
     <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"/></svg>${esc(label)}</button>`;
 
+  const excelWeekButton = (scope = 'schedule', label = 'Xuất Excel tuần') => `<button class="btn secondary" data-v5-action="schedule-xlsx" data-scope="${scope}">
+    <svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v5h5M9 12l5 5m0-5-5 5"/></svg>${esc(label)}</button>`;
+
   const filterToolbar = (content) => `<div class="toolbar"><div class="v5-filter-row">${content}</div></div>`;
 
   function renderWeekBoard(rows, startDate, admin = false) {
@@ -135,7 +138,7 @@ window.RumiV5 = (() => {
   function setupVersion() {
     const chip = document.querySelector('.store-chip');
     if (chip && !chip.querySelector('.v5-version')) chip.insertAdjacentHTML('beforeend', `<span class="v5-version">V${VERSION}</span>`);
-    document.title = 'RUMI Manager 5.3 — Xếp ca, chấm công và bảng lương';
+    document.title = 'RUMI Manager 5.3.2 — Xếp ca, chấm công và Excel';
   }
 
   function setupMobileNav() {
@@ -311,7 +314,7 @@ window.RumiV5 = (() => {
     const boardRows = state.scheduleLocationFilter ? shifts.filter((row) => String(row.location_id) === String(state.scheduleLocationFilter)) : shifts;
     const availableCount = state.candidates.filter((x) => x.state === 'available').length;
     pageNode().innerHTML = `
-      ${intro('XẾP LỊCH LOGIC', 'Lịch làm theo nhu cầu thực tế', 'Chọn số người và vị trí cần. Hệ thống ưu tiên người đúng vị trí, đã đăng ký rảnh, không trùng ca và có ít giờ hơn trong tuần.', exportButton('shifts', 'Xuất lịch tuần'))}
+      ${intro('XẾP LỊCH LOGIC', 'Lịch làm theo nhu cầu thực tế', 'Chọn số người và vị trí cần. Hệ thống ưu tiên người đúng vị trí, đã đăng ký rảnh, không trùng ca và có ít giờ hơn trong tuần.', excelWeekButton('schedule'))}
       <section class="v5-summary-strip">
         ${summaryItem('Tổng ca tuần', boardRows.length, weekLabel(startDate))}
         ${summaryItem('Nhân viên được xếp', unique(boardRows, 'employee_id'), 'Không tính trùng')}
@@ -347,7 +350,7 @@ window.RumiV5 = (() => {
     state.cache.myShifts = rows;
     const upcoming = rows.filter((x) => `${x.shift_date} ${x.start_time}` >= `${today()} 00:00`).sort(byDateTime)[0];
     pageNode().innerHTML = `
-      ${intro('LỊCH CÁ NHÂN', 'Lịch làm của tôi', 'Xem lịch theo tuần, cửa hàng và trạng thái chấm công.', `<button class="btn" data-nav="attendance">${icons.gps} Chấm công GPS</button>`)}
+      ${intro('LỊCH CÁ NHÂN', 'Lịch làm của tôi', 'Xem lịch theo tuần, cửa hàng và trạng thái chấm công.', `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-nav="attendance">${icons.gps} Chấm công GPS</button>${excelWeekButton('my', 'Xuất Excel')}</div>`)}
       ${upcoming ? `<div class="v5-gps-panel"><span class="v5-gps-icon">${icons.calendar}</span><div class="v5-gps-copy"><strong>Ca gần nhất trong tuần</strong><span>${dateVN(upcoming.shift_date)} · ${esc(upcoming.start_time)}–${esc(upcoming.end_time)} · ${esc(upcoming.location_name || '')}</span></div><div class="v5-countdown" data-countdown="${upcoming.shift_date}T${upcoming.start_time}:00">Đang tính…</div></div>` : ''}
       <div class="card"><div class="card-head"><div class="v5-week-toolbar"><div class="v5-week-title"><strong>${weekLabel(startDate)}</strong><span>${rows.length} ca làm</span></div><div class="v5-week-actions"><button class="btn small secondary" data-v5-action="week" data-scope="my" data-step="-7">‹</button><button class="btn small secondary" data-v5-action="week-today" data-scope="my">Tuần này</button><button class="btn small secondary" data-v5-action="week" data-scope="my" data-step="7">›</button></div></div></div><div class="card-body">${renderWeekBoard(rows, startDate, false)}</div></div>`;
   };
@@ -577,6 +580,31 @@ window.RumiV5 = (() => {
     if (count) count.textContent = `${shown} thông báo`;
   }
 
+  async function downloadScheduleWeekXlsx(scope = 'schedule') {
+    const startValue = scope === 'my' ? state.myWeekStart : state.scheduleWeekStart;
+    const startDate = parseLocalDate(startValue);
+    const endValue = localISO(addDays(startDate, 6));
+    const params = new URLSearchParams({ start: startValue, end: endValue });
+    if (scope === 'schedule' && state.scheduleLocationFilter) params.set('location_id', state.scheduleLocationFilter);
+    const response = await fetch(`/api/export/schedule-week.xlsx?${params.toString()}`, {
+      method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    });
+    if (!response.ok) {
+      let message = 'Không thể xuất lịch Excel';
+      try { const payload = await response.json(); message = payload.message || message; } catch (_) {}
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const matched = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = matched?.[1] || `RUMI_lich_lam_tuan_${startValue}.xlsx`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    toast(`Đã xuất lịch tuần ${weekLabel(startDate)}`);
+  }
+
   /* ------------------------------------------------------------------
      CSV exports
   ------------------------------------------------------------------ */
@@ -749,6 +777,14 @@ window.RumiV5 = (() => {
       if (action === 'command') return openCommand();
       if (action === 'refresh') return navigate(state.page);
       if (action === 'export') return exportData(button.dataset.export);
+      if (action === 'schedule-xlsx') {
+        button.disabled = true;
+        const original = button.innerHTML;
+        button.innerHTML = '<span class="loader" style="width:16px;height:16px;border-width:2px"></span> Đang tạo Excel';
+        try { await downloadScheduleWeekXlsx(button.dataset.scope || 'schedule'); }
+        finally { button.disabled = false; button.innerHTML = original; }
+        return;
+      }
       if (action === 'auto-assign') {
         const form = document.querySelector('#v53-schedule-form');
         if (!form || !form.reportValidity()) return;

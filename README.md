@@ -1,4 +1,4 @@
-# RUMI Manager 5.3 OPERATIONS
+# RUMI Manager 5.3.2 — Lịch tuần Excel
 
 Bản nâng cấp tập trung vào luồng vận hành hoàn chỉnh:
 
@@ -54,4 +54,13 @@ Sau deploy, kiểm tra:
 https://TEN-DU-AN.vercel.app/api/health
 ```
 
-Kết quả cần có `"version": "5.3"` và `"operations_ready": true`.
+Kết quả cần có `"version": "5.3.2"` và `"operations_ready": true`.
+
+## Xuất lịch làm tuần Excel
+
+- Admin mở **Xếp lịch làm**, chọn tuần và cửa hàng, sau đó bấm **Xuất Excel tuần**.
+- Nhân viên mở **Lịch làm của tôi** và bấm **Xuất Excel**.
+- File gồm sheet **Lịch tuần** và **Chi tiết ca**.
+- Không cần chạy thêm SQL; dữ liệu được đọc trực tiếp từ các bảng `rumi_*`.
+
+Xem hướng dẫn nâng cấp tại `UPGRADE_V532.md`.
