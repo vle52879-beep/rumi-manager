@@ -115,7 +115,7 @@ function authLayout(card) {
 }
 function showLogin() {
   state.user = null;
-  history.replaceState(null, '', '/login');
+  history.replaceState(null, '', '/#login');
   $('#app-root').classList.add('hidden');
   $('#auth-root').classList.remove('hidden');
   $('#auth-root').innerHTML = authLayout(`<form class="auth-card" data-form="login"><div class="auth-logo-mobile"><div class="brand-mark">${icons.tea}</div><strong>RUMI</strong></div><span class="eyebrow">ĐĂNG NHẬP HỆ THỐNG</span><h2>Chào mừng trở lại</h2><p>Hệ thống sẽ tự đưa bạn đến đúng trang theo vai trò quản trị hoặc nhân viên.</p><div class="field"><label>Tên đăng nhập</label><input name="username" autocomplete="username" required placeholder="Ví dụ: an.nguyen"></div><div class="field" style="margin-top:13px"><label>Mật khẩu</label><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••"></div><button class="btn" type="submit">${icons.key} Đăng nhập</button><div class="auth-hint">Không có chức năng đăng ký. Admin được cấu hình sẵn; tài khoản nhân viên chỉ do admin thêm, sửa hoặc xóa.</div></form>`);
@@ -131,7 +131,7 @@ function buildNav() {
 }
 function enterApp(user) {
   state.user = user;
-  history.replaceState(null, '', '/app');
+  history.replaceState(null, '', '/#dashboard');
   $('#auth-root').classList.add('hidden');
   $('#app-root').classList.remove('hidden');
   const name = user.name || user.username;

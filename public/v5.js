@@ -663,7 +663,7 @@ window.RumiV5 = (() => {
   navigate = async function navigateV5(page) {
     if (state.user) {
       sessionStorage.setItem('rumi-last-page', page);
-      history.replaceState(null, '', `/app#${page}`);
+      history.replaceState(null, '', `/#${page}`);
     }
     const result = await legacyNavigate(page);
     afterRender();
