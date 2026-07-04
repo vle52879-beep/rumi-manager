@@ -4,7 +4,7 @@ from io import BytesIO
 from zipfile import ZipFile
 
 from excel_export import build_schedule_week_xlsx
-from server import attendance_metrics, calculate_hours, make_session, overlaps, parse_session, password_hash, verify_password
+from server import RumiHandler, attendance_metrics, calculate_hours, make_session, overlaps, parse_session, password_hash, verify_password
 
 
 def main():
@@ -21,6 +21,18 @@ def main():
     assert metrics["late_minutes"] == 5
     assert metrics["overtime_minutes"] == 10
     assert metrics["payable_hours"] == 4.08
+
+    employee = {
+        "id": 1, "status": "Đang làm", "role": "Pha chế", "employment_type": "Full-time",
+        "weekly_target_hours": 48, "max_weekly_hours": 48, "max_daily_hours": 8,
+        "max_consecutive_days": 6, "weekly_days_off": 1,
+    }
+    opening = {"work_date":"2026-07-06","start_time":"08:00","end_time":"16:00","required_role":"Pha chế","eligible_employment_type":"Tất cả"}
+    rule = RumiHandler.employee_shift_rule(None, employee, opening, [], [], [])
+    assert rule["allowed"] and rule["projected_week_hours"] == 8
+    six_days = [{"employee_id":1,"shift_date":f"2026-07-{day:02d}","start_time":"08:00","end_time":"16:00","status":"Đã xếp"} for day in range(6,12)]
+    blocked = RumiHandler.employee_shift_rule(None, employee, {**opening,"work_date":"2026-07-12"}, six_days, [], [])
+    assert not blocked["allowed"] and any("nghỉ" in reason for reason in blocked["reasons"])
 
     workbook = build_schedule_week_xlsx(
         [{
@@ -42,6 +54,7 @@ def main():
     print("✓ Chữ ký phiên đăng nhập")
     print("✓ Kiểm tra trùng ca")
     print("✓ Tính giờ công, đi trễ và tăng ca")
+    print("✓ Luật Full-time 6 ngày làm + 1 ngày nghỉ")
     print("✓ Xuất lịch tuần Excel 2 sheet")
     print("Self-test hoàn tất.")
 

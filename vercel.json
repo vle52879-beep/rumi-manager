@@ -36,7 +36,7 @@
       ]
     },
     {
-      "source": "/(app.js|v5.js|styles.css|v5.css|icon.svg)",
+      "source": "/(app.js|v5.js|v54.js|styles.css|v5.css|v54.css|icon.svg)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]

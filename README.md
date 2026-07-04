@@ -1,66 +1,17 @@
-# RUMI Manager 5.3.2 — Lịch tuần Excel
+# RUMI Manager 5.4 SHIFT MARKET
 
-Bản nâng cấp tập trung vào luồng vận hành hoàn chỉnh:
+Bản quản lý nhân viên quán trà sữa dùng chung Supabase với IC3 Smart Class nhưng chỉ sử dụng bảng `rumi_*`.
 
-1. Nhân viên đăng ký lịch rảnh.
-2. Admin nhập ngày, giờ, cửa hàng, vị trí công việc và số người cần.
-3. Hệ thống xếp hạng người phù hợp theo lịch rảnh đã duyệt, trùng ca, nghỉ phép, đúng vị trí và tổng giờ trong tuần.
-4. Admin chọn thủ công hoặc **Xếp tự động** nhiều nhân viên.
-5. Nhân viên chấm công vào/ra bằng GPS và đúng khung giờ.
-6. Hệ thống tự tính giờ theo lịch, giờ thực tế, giờ tính lương, đi trễ, về sớm và tăng ca.
-7. Admin tạo bản nháp, kiểm tra, điều chỉnh và chốt bảng lương tháng.
-8. Xuất bảng công, bảng lương CSV dùng được với Excel và in phiếu lương từng nhân viên.
+## Tính năng chính
 
-## Nâng cấp cơ sở dữ liệu
+- Admin đăng nhu cầu ca làm theo ngày, giờ, cửa hàng, vị trí và số người cần.
+- Nhân viên Full-time/Part-time đăng ký ca đang mở.
+- Admin duyệt, đưa vào danh sách chờ hoặc từ chối từng đơn.
+- Khi duyệt đơn, hệ thống tự tạo ca chính thức và gửi thông báo.
+- Khi chốt ca, hệ thống từ chối các đơn còn lại.
+- Full-time đăng ký ngày nghỉ ưu tiên; admin duyệt và xếp tự động các ngày còn lại.
+- Chặn trùng ca, nghỉ phép, ngày nghỉ tuần, quá giờ/ngày, quá giờ/tuần và quá số ngày làm liên tiếp.
+- Cảnh báo Full-time thiếu giờ, làm quá 6 ngày hoặc chưa có ngày nghỉ.
+- Chấm công GPS, bảng công, bảng lương tháng và xuất Excel lịch tuần giữ nguyên.
 
-Dự án mới cài lần đầu:
-
-1. Chạy `sql/SUPABASE_RUMI_V4_FULL.sql`.
-2. Chạy `sql/SUPABASE_RUMI_V5_3_OPERATIONS.sql`.
-
-Dự án đang chạy RUMI v5.2 chỉ cần chạy file thứ hai.
-
-Migration chỉ tạo hoặc sửa bảng/hàm có tiền tố `rumi_`, không đọc hay sửa bảng IC3 Smart Class.
-
-## Bảng mới
-
-- `rumi_payroll_runs`: trạng thái bảng lương từng tháng.
-- `rumi_payroll_items`: số liệu bảng lương đã lưu/chốt theo nhân viên.
-
-Bảng `rumi_attendance` được bổ sung các cột chi tiết giờ công.
-
-## Kiểm tra
-
-```bash
-python3 self_test.py
-python3 verify_setup.py
-```
-
-## Chạy máy cá nhân
-
-```bash
-python3 server.py
-```
-
-Mở `http://localhost:8000`.
-
-## Đẩy lên Vercel
-
-Giữ nguyên Environment Variables đang có. Ghi đè mã nguồn vào repository hiện tại, commit và push. Vercel tự triển khai commit mới.
-
-Sau deploy, kiểm tra:
-
-```text
-https://TEN-DU-AN.vercel.app/api/health
-```
-
-Kết quả cần có `"version": "5.3.2"` và `"operations_ready": true`.
-
-## Xuất lịch làm tuần Excel
-
-- Admin mở **Xếp lịch làm**, chọn tuần và cửa hàng, sau đó bấm **Xuất Excel tuần**.
-- Nhân viên mở **Lịch làm của tôi** và bấm **Xuất Excel**.
-- File gồm sheet **Lịch tuần** và **Chi tiết ca**.
-- Không cần chạy thêm SQL; dữ liệu được đọc trực tiếp từ các bảng `rumi_*`.
-
-Xem hướng dẫn nâng cấp tại `UPGRADE_V532.md`.
+Xem hướng dẫn triển khai trong [UPGRADE_V54.md](UPGRADE_V54.md).
