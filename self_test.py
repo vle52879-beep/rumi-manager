@@ -4,13 +4,14 @@ from io import BytesIO
 from zipfile import ZipFile
 
 from excel_export import build_schedule_week_xlsx
-from server import RumiHandler, attendance_metrics, calculate_hours, make_session, overlaps, parse_session, password_hash, verify_password
+from server import PASSWORD_ITERATIONS, RumiHandler, attendance_metrics, calculate_hours, make_session, overlaps, parse_session, password_hash, validate_password_policy, verify_password
 
 
 def main():
-    digest, salt = password_hash("MatKhauAnToan123")
-    assert verify_password("MatKhauAnToan123", digest, salt)
-    assert not verify_password("sai", digest, salt)
+    digest, salt = password_hash("MatKhauAnToan123!", iterations=PASSWORD_ITERATIONS)
+    assert verify_password("MatKhauAnToan123!", digest, salt, PASSWORD_ITERATIONS)
+    validate_password_policy("MatKhauAnToan123!", "nhanvien")
+    assert not verify_password("sai", digest, salt, PASSWORD_ITERATIONS)
     token = make_session(42)
     assert parse_session(token) == 42
     assert parse_session(token + "x") is None
@@ -20,7 +21,13 @@ def main():
     metrics = attendance_metrics({"start_time":"08:00","end_time":"12:00"}, "08:05", "12:10")
     assert metrics["late_minutes"] == 5
     assert metrics["overtime_minutes"] == 10
-    assert metrics["payable_hours"] == 4.08
+    assert metrics["base_payable_minutes"] == 235
+    assert metrics["payable_minutes"] == 235
+    assert metrics["payable_hours"] == 3.92
+    assert metrics["overtime_status"] == "Chờ duyệt"
+    approved = attendance_metrics({"start_time":"08:00","end_time":"12:00"}, "07:50", "12:10", approve_overtime=True)
+    assert approved["base_payable_minutes"] == 240
+    assert approved["payable_minutes"] == 250
 
     employee = {
         "id": 1, "status": "Đang làm", "role": "Pha chế", "employment_type": "Full-time",
@@ -50,10 +57,10 @@ def main():
         assert "xl/worksheets/sheet1.xml" in names
         assert "xl/worksheets/sheet2.xml" in names
 
-    print("✓ Băm mật khẩu PBKDF2")
+    print("✓ PBKDF2-HMAC-SHA256 600.000 vòng và chính sách mật khẩu")
     print("✓ Chữ ký phiên đăng nhập")
     print("✓ Kiểm tra trùng ca")
-    print("✓ Tính giờ công, đi trễ và tăng ca")
+    print("✓ Tính giờ lương theo khung ca; tăng ca phải duyệt")
     print("✓ Luật Full-time 6 ngày làm + 1 ngày nghỉ")
     print("✓ Xuất lịch tuần Excel 2 sheet")
     print("Self-test hoàn tất.")

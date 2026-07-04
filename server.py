@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RUMI Manager v5.4 SHIFT MARKET — fixed admin account, employee CRUD, roles, scheduling and GPS.
+"""RUMI Manager v5.5 SECURITY & SMART ATTENDANCE — fixed admin account, employee CRUD, roles, scheduling and GPS.
 
 Python standard library only. The Supabase secret key stays in this backend and
 is never sent to the browser. Every database object used by this app starts
@@ -33,10 +33,15 @@ from excel_export import build_schedule_week_xlsx
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
 ENV_FILES = [ROOT / ".env", ROOT / ".env.local"]
-SESSION_COOKIE = "rumi_session"
+SESSION_COOKIE = "__Host-rumi_session"
+LEGACY_SESSION_COOKIE = "rumi_session"
 SESSION_TTL = 12 * 60 * 60
-PASSWORD_ITERATIONS = 210_000
-LOGIN_ATTEMPTS: dict[str, list[float]] = defaultdict(list)
+SESSION_IDLE_TTL = 2 * 60 * 60
+PASSWORD_ITERATIONS = 600_000
+PASSWORD_MIN_LENGTH = 10
+PASSWORD_MAX_LENGTH = 128
+LOGIN_WINDOW_SECONDS = 10 * 60
+LOGIN_LOCK_MINUTES = 15
 
 
 class TTLCache:
@@ -107,6 +112,11 @@ TABLES = {
     "payroll_items": "rumi_payroll_items",
     "notifications": "rumi_notifications",
     "audit": "rumi_audit_logs",
+    "auth_sessions": "rumi_auth_sessions",
+    "password_history": "rumi_password_history",
+    "login_throttles": "rumi_login_throttles",
+    "attendance_events": "rumi_attendance_events",
+    "attendance_corrections": "rumi_attendance_correction_requests",
 }
 
 
@@ -226,23 +236,42 @@ def minutes_delta(start: str, end: str) -> int:
     return time_minutes(end) - time_minutes(start)
 
 
-def attendance_metrics(shift: dict, check_in: str, check_out: str | None) -> dict:
+def attendance_metrics(shift: dict, check_in: str, check_out: str | None, *, approve_overtime: bool = False) -> dict:
+    """Calculate salary minutes against the scheduled window.
+
+    Early arrival never increases salary. Minutes after the scheduled end are
+    recorded as requested overtime and only become payable after approval.
+    """
     scheduled_minutes = max(minutes_delta(shift["start_time"], shift["end_time"]), 0)
     late_minutes = max(minutes_delta(shift["start_time"], check_in), 0) if check_in else 0
     if not check_out:
         return {
+            "scheduled_minutes": scheduled_minutes,
+            "worked_minutes": 0,
+            "base_payable_minutes": 0,
+            "payable_minutes": 0,
             "scheduled_hours": round(scheduled_minutes / 60, 2),
             "payable_hours": 0.0,
             "late_minutes": late_minutes,
             "early_leave_minutes": 0,
             "overtime_minutes": 0,
+            "overtime_requested_minutes": 0,
+            "overtime_approved_minutes": 0,
+            "overtime_status": "Không có",
             "status": "Đang làm",
             "calculation_note": f"Vào trễ {late_minutes} phút" if late_minutes else "Vào ca đúng giờ",
         }
-    actual_minutes = max(minutes_delta(check_in, check_out), 0)
+    worked_minutes = max(minutes_delta(check_in, check_out), 0)
     early_minutes = max(minutes_delta(check_out, shift["end_time"]), 0)
     overtime_minutes = max(minutes_delta(shift["end_time"], check_out), 0)
-    if late_minutes and early_minutes:
+    salary_start = max(time_minutes(check_in), time_minutes(shift["start_time"]))
+    salary_end = min(time_minutes(check_out), time_minutes(shift["end_time"]))
+    base_payable = max(salary_end - salary_start, 0)
+    approved_overtime = overtime_minutes if approve_overtime else 0
+    payable_minutes = base_payable + approved_overtime
+    if overtime_minutes and not approve_overtime:
+        status = "Chờ duyệt tăng ca"
+    elif late_minutes and early_minutes:
         status = "Đi trễ & về sớm"
     elif late_minutes:
         status = "Đi trễ"
@@ -252,21 +281,27 @@ def attendance_metrics(shift: dict, check_in: str, check_out: str | None) -> dic
         status = "Có tăng ca"
     else:
         status = "Hoàn thành"
-    payable = round(actual_minutes / 60, 2)
     parts = []
     if late_minutes:
         parts.append(f"Trễ {late_minutes} phút")
     if early_minutes:
         parts.append(f"Về sớm {early_minutes} phút")
     if overtime_minutes:
-        parts.append(f"Tăng ca {overtime_minutes} phút")
-    parts.append(f"Giờ tính lương {payable}")
+        parts.append(f"Tăng ca đề nghị {overtime_minutes} phút")
+    parts.append(f"Tính lương {payable_minutes} phút")
     return {
+        "scheduled_minutes": scheduled_minutes,
+        "worked_minutes": worked_minutes,
+        "base_payable_minutes": base_payable,
+        "payable_minutes": payable_minutes,
         "scheduled_hours": round(scheduled_minutes / 60, 2),
-        "payable_hours": payable,
+        "payable_hours": round(payable_minutes / 60, 2),
         "late_minutes": late_minutes,
         "early_leave_minutes": early_minutes,
         "overtime_minutes": overtime_minutes,
+        "overtime_requested_minutes": overtime_minutes,
+        "overtime_approved_minutes": approved_overtime,
+        "overtime_status": "Không có" if not overtime_minutes else ("Đã duyệt" if approve_overtime else "Chờ duyệt"),
         "status": status,
         "calculation_note": " · ".join(parts),
     }
@@ -319,7 +354,7 @@ class SupabaseREST:
         headers = {
             "apikey": self.service_key,
             "Accept": "application/json",
-            "User-Agent": "RUMI-Backend/5.4",
+            "User-Agent": "RUMI-Backend/5.5",
         }
         if self.service_key.startswith("eyJ"):
             headers["Authorization"] = f"Bearer {self.service_key}"
@@ -357,13 +392,17 @@ class SupabaseREST:
         text = str(message or "Lỗi cơ sở dữ liệu")
         lowered = text.lower()
         if code == "42P01" or "could not find the table" in lowered or ("relation" in lowered and "does not exist" in lowered):
+            if any(name in lowered for name in ("auth_sessions", "password_history", "login_throttles", "attendance_events", "attendance_correction")):
+                return "Chưa nâng cấp RUMI v5.5. Hãy chạy sql/SUPABASE_RUMI_V5_5_SECURITY_ATTENDANCE.sql trong Supabase."
             if "shift_openings" in lowered or "shift_applications" in lowered or "weekly_day_off" in lowered:
                 return "Chưa nâng cấp RUMI v5.4. Hãy chạy sql/SUPABASE_RUMI_V5_4_SHIFT_MARKET.sql trong Supabase."
             if "payroll_runs" in lowered or "payroll_items" in lowered:
                 return "Chưa nâng cấp RUMI v5.3. Hãy chạy sql/SUPABASE_RUMI_V5_3_OPERATIONS.sql trong Supabase."
             return "Chưa tạo đủ bảng RUMI. Hãy chạy SQL v4, v5.3 rồi v5.4 theo đúng thứ tự."
         if "could not find the function" in lowered:
-            return "Chưa tạo hàm nghiệp vụ RUMI v4. Hãy chạy lại file SQL v4 trong Supabase."
+            if "v55" in lowered or "auth_register_failure" in lowered or "auth_clear_failures" in lowered:
+                return "Chưa tạo hàm bảo mật/chấm công RUMI v5.5. Hãy chạy lại SQL v5.5 trong Supabase."
+            return "Chưa tạo hàm nghiệp vụ RUMI. Hãy chạy các file SQL nâng cấp theo đúng thứ tự."
         if code == "23505":
             if "username" in lowered:
                 return "Tên đăng nhập đã tồn tại"
@@ -447,46 +486,125 @@ ADMIN_DISPLAY_NAME = (os.environ.get("RUMI_ADMIN_NAME") or "Chủ cửa hàng RU
 ADMIN_RESET_ON_START = str(os.environ.get("RUMI_ADMIN_RESET_ON_START", "0")).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def password_hash(password: str, salt_b64: str | None = None) -> tuple[str, str]:
+def password_material(password: str) -> bytes:
+    """Return password bytes, optionally protected with a backend-only pepper."""
+    pepper = (os.environ.get("RUMI_PASSWORD_PEPPER") or "").encode("utf-8")
+    raw = password.encode("utf-8")
+    return hmac.new(pepper, raw, hashlib.sha256).digest() if pepper else raw
+
+
+def password_hash(password: str, salt_b64: str | None = None, iterations: int = PASSWORD_ITERATIONS) -> tuple[str, str]:
     if salt_b64:
         salt = base64.urlsafe_b64decode(salt_b64.encode("ascii"))
     else:
         salt = secrets.token_bytes(18)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+    rounds = max(100_000, min(integer(iterations, PASSWORD_ITERATIONS), 2_000_000))
+    digest = hashlib.pbkdf2_hmac("sha256", password_material(password), salt, rounds)
     return base64.urlsafe_b64encode(digest).decode("ascii"), base64.urlsafe_b64encode(salt).decode("ascii")
 
 
-def verify_password(password: str, expected: str, salt: str) -> bool:
-    actual, _ = password_hash(password, salt)
-    return hmac.compare_digest(actual, expected)
+def verify_password(password: str, expected: str, salt: str, iterations: int = PASSWORD_ITERATIONS) -> bool:
+    try:
+        actual, _ = password_hash(password, salt, iterations)
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
+
+
+def validate_password_policy(password: str, username: str = "", *, admin: bool = False) -> None:
+    minimum = 12 if admin else PASSWORD_MIN_LENGTH
+    if len(password) < minimum:
+        raise APIError(f"Mật khẩu phải có ít nhất {minimum} ký tự")
+    if len(password) > PASSWORD_MAX_LENGTH:
+        raise APIError(f"Mật khẩu không được vượt quá {PASSWORD_MAX_LENGTH} ký tự")
+    categories = sum(bool(re.search(pattern, password)) for pattern in (r"[a-z]", r"[A-Z]", r"\d", r"[^A-Za-z0-9]"))
+    if categories < 3:
+        raise APIError("Mật khẩu cần có ít nhất 3 nhóm: chữ thường, chữ hoa, số hoặc ký tự đặc biệt")
+    normalized = re.sub(r"[^a-z0-9]", "", password.lower())
+    blocked = {
+        "password", "password123", "matkhau", "matkhau123", "1234567890", "qwerty123",
+        "admin123", "rumi2026", "rumi2026abc", "letmein", "welcome123",
+    }
+    if normalized in blocked or normalized.startswith("123456"):
+        raise APIError("Mật khẩu quá phổ biến, vui lòng chọn mật khẩu khác")
+    user_clean = re.sub(r"[^a-z0-9]", "", str(username).lower())
+    if user_clean and len(user_clean) >= 3 and user_clean in normalized:
+        raise APIError("Mật khẩu không được chứa tên đăng nhập")
 
 
 def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
 
-def b64url_decode(text: str) -> bytes:
-    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+def hash_secret(value: str, purpose: str) -> str:
+    key = SESSION_SECRET or hashlib.sha256(b"RUMI-SESSION-FALLBACK").digest()
+    return hmac.new(key, f"{purpose}|{value}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def create_session_token() -> str:
+    return b64url(secrets.token_bytes(32))
+
+
+def session_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def utc_now() -> datetime:
+    return datetime.now().astimezone()
+
+
+def iso_after(seconds: int) -> str:
+    return (utc_now() + timedelta(seconds=seconds)).isoformat(timespec="seconds")
+
+
+def parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def minutes_until(value: str | None) -> int:
+    target = parse_iso_datetime(value)
+    if not target:
+        return 0
+    return max(0, int((target - utc_now()).total_seconds() // 60) + 1)
 
 
 def make_session(user_id: int) -> str:
+    """Legacy self-test helper. Production sessions are opaque DB-backed tokens."""
     payload = b64url(json.dumps({"uid": user_id, "exp": int(time.time()) + SESSION_TTL, "nonce": secrets.token_hex(8)}, separators=(",", ":")).encode("utf-8"))
     signature = b64url(hmac.new(SESSION_SECRET, payload.encode("ascii"), hashlib.sha256).digest())
     return payload + "." + signature
 
 
 def parse_session(token: str) -> int | None:
+    """Legacy verifier kept only for migration/self-test compatibility."""
     try:
         payload, signature = token.split(".", 1)
         expected = b64url(hmac.new(SESSION_SECRET, payload.encode("ascii"), hashlib.sha256).digest())
         if not hmac.compare_digest(signature, expected):
             return None
-        data = json.loads(b64url_decode(payload).decode("utf-8"))
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode("utf-8"))
         if integer(data.get("exp")) < int(time.time()):
             return None
         return integer(data.get("uid")) or None
     except Exception:
         return None
+
+
+def password_reused(user_id: int, password: str, current_user_row: dict | None = None) -> bool:
+    rows = []
+    if current_user_row:
+        rows.append(current_user_row)
+    rows.extend(SB.select(TABLES["password_history"], filters={"user_id": f"eq.{user_id}"}, order="created_at.desc", limit=3,
+                          columns="password_hash,password_salt,password_iterations"))
+    for row in rows:
+        if verify_password(password, row.get("password_hash", ""), row.get("password_salt", ""), integer(row.get("password_iterations"), 210_000)):
+            return True
+    return False
 
 
 def public_user(user: dict, employee: dict | None = None) -> dict:
@@ -505,6 +623,10 @@ def public_user(user: dict, employee: dict | None = None) -> dict:
         "max_daily_hours": employee.get("max_daily_hours"),
         "max_consecutive_days": employee.get("max_consecutive_days"),
         "weekly_days_off": employee.get("weekly_days_off"),
+        "must_change_password": bool(user.get("must_change_password")),
+        "password_changed_at": user.get("password_changed_at"),
+        "last_login_at": user.get("last_login_at"),
+        "account_locked_until": user.get("locked_until"),
     }
 
 
@@ -530,19 +652,29 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/5.4.0"
+    server_version = "RUMI/5.5.0"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
+
+    def add_security_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("Permissions-Policy", "geolocation=(self), camera=(), microphone=()")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+        if self.is_secure_request():
+            self.send_header("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 
     def send_json(self, payload, status=200, extra_headers: dict | None = None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Cache-Control", "private, no-store")
+        self.add_security_headers()
         if extra_headers:
             for key, value in extra_headers.items():
                 self.send_header(key, value)
@@ -561,9 +693,8 @@ class RumiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Cache-Control", "private, no-store")
+        self.add_security_headers()
         self.end_headers()
         self.wfile.write(payload)
 
@@ -589,24 +720,111 @@ class RumiHandler(BaseHTTPRequestHandler):
         except cookies.CookieError:
             return ""
 
-    def session_header(self, token: str, max_age: int = SESSION_TTL) -> str:
-        secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
-        parts = [f"{SESSION_COOKIE}={token}", "Path=/", "HttpOnly", "SameSite=Lax", f"Max-Age={max_age}"]
+    def is_secure_request(self) -> bool:
+        proto = (self.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
+        return proto == "https"
+
+    def client_ip(self) -> str:
+        forwarded = (self.headers.get("X-Forwarded-For") or "").split(",", 1)[0].strip()
+        return forwarded or (self.client_address[0] if self.client_address else "0.0.0.0")
+
+    def ip_hash(self) -> str:
+        return hash_secret(self.client_ip(), "ip")
+
+    def user_agent_hash(self) -> str:
+        return hash_secret(self.headers.get("User-Agent", ""), "ua")
+
+    def device_label(self) -> str:
+        ua = self.headers.get("User-Agent", "")
+        browser = "Trình duyệt"
+        if "Edg/" in ua:
+            browser = "Microsoft Edge"
+        elif "Chrome/" in ua and "Chromium" not in ua:
+            browser = "Google Chrome"
+        elif "Safari/" in ua and "Chrome/" not in ua:
+            browser = "Safari"
+        elif "Firefox/" in ua:
+            browser = "Firefox"
+        device = "Điện thoại" if re.search(r"Mobile|Android|iPhone", ua, re.I) else "Máy tính"
+        return f"{browser} · {device}"
+
+    def session_token(self) -> str:
+        return self.cookie_value(SESSION_COOKIE) or self.cookie_value(LEGACY_SESSION_COOKIE)
+
+    def session_header(self, token: str, max_age: int | None = None) -> str:
+        secure = self.is_secure_request()
+        name = SESSION_COOKIE if secure else LEGACY_SESSION_COOKIE
+        parts = [f"{name}={token}", "Path=/", "HttpOnly", "SameSite=Strict"]
         if secure:
             parts.append("Secure")
+        if max_age is not None:
+            parts.append(f"Max-Age={max_age}")
         return "; ".join(parts)
 
-    def current_user(self, required: bool = True) -> dict | None:
-        user_id = parse_session(self.cookie_value(SESSION_COOKIE))
-        if not user_id:
+    def create_db_session(self, user_id: int) -> tuple[str, dict]:
+        token = create_session_token()
+        row = SB.insert(TABLES["auth_sessions"], {
+            "user_id": user_id,
+            "token_hash": session_token_hash(token),
+            "user_agent_hash": self.user_agent_hash(),
+            "ip_hash": self.ip_hash(),
+            "device_label": self.device_label(),
+            "last_seen_at": now_iso(),
+            "idle_expires_at": iso_after(SESSION_IDLE_TTL),
+            "expires_at": iso_after(SESSION_TTL),
+        })
+        return token, row
+
+    def current_session(self, required: bool = True) -> dict | None:
+        token = self.session_token()
+        if not token:
             if required:
                 raise APIError("Phiên đăng nhập đã hết hạn", 401)
             return None
-        cached = USER_CACHE.get(user_id)
-        if cached:
-            return cached
+        token_hash = session_token_hash(token)
+        rows = SB.select(TABLES["auth_sessions"], filters={"token_hash": f"eq.{token_hash}"}, limit=1)
+        if not rows:
+            if required:
+                raise APIError("Phiên đăng nhập không hợp lệ", 401)
+            return None
+        session = rows[0]
+        if session.get("revoked_at"):
+            if required:
+                raise APIError("Phiên đăng nhập đã bị thu hồi", 401)
+            return None
+        now = utc_now()
+        expires = parse_iso_datetime(session.get("expires_at"))
+        idle_expires = parse_iso_datetime(session.get("idle_expires_at"))
+        if not expires or not idle_expires or expires <= now or idle_expires <= now:
+            SB.update(TABLES["auth_sessions"], {"revoked_at": now_iso(), "revoke_reason": "Hết hạn"}, {"id": f"eq.{session['id']}"})
+            if required:
+                raise APIError("Phiên đăng nhập đã hết hạn", 401)
+            return None
+        if session.get("user_agent_hash") and not hmac.compare_digest(str(session.get("user_agent_hash")), self.user_agent_hash()):
+            SB.update(TABLES["auth_sessions"], {"revoked_at": now_iso(), "revoke_reason": "Thiết bị thay đổi"}, {"id": f"eq.{session['id']}"})
+            raise APIError("Phiên đăng nhập không còn hợp lệ trên thiết bị này", 401)
+        last_seen = parse_iso_datetime(session.get("last_seen_at"))
+        if not last_seen or (now - last_seen).total_seconds() >= 300:
+            updates = {"last_seen_at": now_iso(), "idle_expires_at": iso_after(SESSION_IDLE_TTL)}
+            if session.get("ip_hash") != self.ip_hash():
+                updates["ip_hash"] = self.ip_hash()
+            SB.update(TABLES["auth_sessions"], updates, {"id": f"eq.{session['id']}"})
+            session.update(updates)
+        session["token_hash_current"] = token_hash
+        return session
+
+    def revoke_current_session(self, reason: str = "Đăng xuất") -> None:
+        token = self.session_token()
+        if token:
+            SB.update(TABLES["auth_sessions"], {"revoked_at": now_iso(), "revoke_reason": reason}, {"token_hash": f"eq.{session_token_hash(token)}", "revoked_at": "is.null"})
+
+    def current_user(self, required: bool = True) -> dict | None:
+        session = self.current_session(required)
+        if not session:
+            return None
+        user_id = integer(session.get("user_id"))
         users = SB.select(TABLES["users"], filters={"id": f"eq.{user_id}", "active": "eq.true"}, limit=1,
-                          columns="id,username,password_hash,password_salt,role,employee_id,active,last_login_at")
+                          columns="id,username,password_hash,password_salt,password_iterations,must_change_password,password_changed_at,role,employee_id,active,last_login_at,locked_until,failed_login_count")
         if not users:
             if required:
                 raise APIError("Tài khoản không còn hoạt động", 401)
@@ -621,7 +839,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 raise APIError("Tài khoản nhân viên đã bị khóa", 403)
         user["profile"] = public_user(user, employee)
         user["employee"] = employee
-        USER_CACHE.set(user_id, user, 20)
+        user["session"] = session
         return user
 
     @staticmethod
@@ -629,9 +847,26 @@ class RumiHandler(BaseHTTPRequestHandler):
         if user.get("role") != role:
             raise APIError("Bạn không có quyền thực hiện thao tác này", 403)
 
+    def require_password_changed(self, user: dict, path: str) -> None:
+        allowed = {
+            "/api/auth/me", "/api/bootstrap", "/api/account/security",
+            "/api/auth/change-password", "/api/auth/logout", "/api/auth/logout-all",
+        }
+        if user.get("must_change_password") and path not in allowed:
+            raise APIError("Bạn phải đổi mật khẩu trước khi tiếp tục", 428)
+
     def require_csrf(self):
         if self.headers.get("X-RUMI-Request") != "1":
             raise APIError("Yêu cầu không hợp lệ", 403)
+        fetch_site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        if fetch_site and fetch_site not in {"same-origin", "none"}:
+            raise APIError("Yêu cầu khác nguồn đã bị chặn", 403)
+        origin = self.headers.get("Origin")
+        if origin:
+            origin_host = urlparse(origin).netloc.lower()
+            request_host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "").split(",", 1)[0].strip().lower()
+            if origin_host and request_host and origin_host != request_host:
+                raise APIError("Nguồn yêu cầu không hợp lệ", 403)
 
     def do_GET(self):
         try:
@@ -651,6 +886,7 @@ class RumiHandler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             if not parsed.path.startswith("/api/"):
                 raise APIError("Không tìm thấy đường dẫn", 404)
+            self.require_csrf()
             self.handle_api_post(parsed.path, self.parse_json())
             if parsed.path not in {"/api/auth/login", "/api/auth/logout"}:
                 USER_CACHE.clear()
@@ -664,6 +900,7 @@ class RumiHandler(BaseHTTPRequestHandler):
     def do_PUT(self):
         try:
             parsed = urlparse(self.path)
+            self.require_csrf()
             self.handle_api_put(parsed.path, self.parse_json())
             USER_CACHE.clear()
             PAYROLL_CACHE.clear()
@@ -675,6 +912,7 @@ class RumiHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         try:
+            self.require_csrf()
             self.handle_api_delete(urlparse(self.path).path)
             USER_CACHE.clear()
             PAYROLL_CACHE.clear()
@@ -721,9 +959,7 @@ class RumiHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "same-origin")
+        self.add_security_headers()
         self.end_headers()
         self.wfile.write(content)
 
@@ -1081,14 +1317,20 @@ class RumiHandler(BaseHTTPRequestHandler):
         for row in attendance:
             eid = integer(row.get("employee_id"))
             bucket = totals[eid]
-            actual = num(row.get("hours"))
-            payable = num(row.get("payable_hours"), actual) or actual
+            worked_minutes = integer(row.get("worked_minutes"))
+            if worked_minutes > 0:
+                actual = round(worked_minutes / 60, 2)
+            elif row.get("check_in") and row.get("check_out"):
+                actual = calculate_hours(str(row.get("check_in")), str(row.get("check_out")))
+            else:
+                actual = num(row.get("hours"))
+            payable = num(row.get("payable_hours"), num(row.get("hours")))
             bucket["actual_hours"] += actual
             bucket["payable_hours"] += payable
             bucket["scheduled_hours"] += num(row.get("scheduled_hours"))
             bucket["late_minutes"] += integer(row.get("late_minutes"))
             bucket["early_leave_minutes"] += integer(row.get("early_leave_minutes"))
-            bucket["overtime_minutes"] += integer(row.get("overtime_minutes"))
+            bucket["overtime_minutes"] += integer(row.get("overtime_approved_minutes"), integer(row.get("overtime_minutes")))
             if row.get("check_out") or row.get("status") != "Đang làm":
                 bucket["attendance_count"] += 1
         adj_map = {integer(x.get("employee_id")): x for x in adjustments}
@@ -1402,20 +1644,50 @@ class RumiHandler(BaseHTTPRequestHandler):
                 employees=lambda: SB.select(TABLES["employees"], limit=1, columns="id"),
                 payroll_runs=lambda: SB.select(TABLES["payroll_runs"], limit=1, columns="id"),
                 shift_openings=lambda: SB.select(TABLES["openings"], limit=1, columns="id"),
+                auth_sessions=lambda: SB.select(TABLES["auth_sessions"], limit=1, columns="id"),
+                attendance_events=lambda: SB.select(TABLES["attendance_events"], limit=1, columns="id"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "5.4.0", "operations_ready": True, "schedule_excel": True, "shift_market": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "5.5.0", "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
 
         user = self.current_user()
+        self.require_password_changed(user, path)
 
         if path == "/api/auth/me":
             return self.ok(user["profile"])
 
+        if path == "/api/account/security":
+            sessions = SB.select(TABLES["auth_sessions"], filters={"user_id": f"eq.{user['id']}"}, order="created_at.desc", limit=30,
+                                 columns="id,device_label,created_at,last_seen_at,idle_expires_at,expires_at,revoked_at,revoke_reason,ip_hash")
+            current_id = integer((user.get("session") or {}).get("id"))
+            clean_sessions = []
+            for row in sessions:
+                item = {k: row.get(k) for k in ("id","device_label","created_at","last_seen_at","idle_expires_at","expires_at","revoked_at","revoke_reason")}
+                item["current"] = integer(row.get("id")) == current_id
+                item["active"] = not bool(row.get("revoked_at")) and (parse_iso_datetime(row.get("expires_at")) or utc_now()) > utc_now()
+                clean_sessions.append(item)
+            events = SB.select(TABLES["audit"], filters={"user_id": f"eq.{user['id']}", "entity_type": "eq.security"}, order="created_at.desc", limit=20,
+                               columns="id,action,entity_id,detail,created_at")
+            return self.ok({
+                "profile": user["profile"],
+                "sessions": clean_sessions,
+                "events": events,
+                "policy": {
+                    "minimum_length": 12 if user.get("role") == "admin" else PASSWORD_MIN_LENGTH,
+                    "password_history": 5,
+                    "idle_timeout_minutes": SESSION_IDLE_TTL // 60,
+                    "absolute_timeout_hours": SESSION_TTL // 3600,
+                    "max_failed_attempts": 5,
+                    "lock_minutes": LOGIN_LOCK_MINUTES,
+                    "hash_iterations": PASSWORD_ITERATIONS,
+                },
+            })
+
         if path == "/api/bootstrap":
-            dashboard = self.build_dashboard(user)
-            return self.ok({"user": user["profile"], "dashboard": dashboard, "unread_count": dashboard.get("unread_count", 0)})
+            dashboard = None if user.get("must_change_password") else self.build_dashboard(user)
+            return self.ok({"user": user["profile"], "dashboard": dashboard, "unread_count": (dashboard or {}).get("unread_count", 0)})
 
         if path == "/api/dashboard":
             return self.ok(self.build_dashboard(user))
@@ -1453,12 +1725,23 @@ class RumiHandler(BaseHTTPRequestHandler):
         if path == "/api/page/attendance":
             month = query.get("month", [current_month()])[0]
             if user.get("role") == "admin":
-                return self.ok({"history": self.build_attendance_rows(user, month)})
+                history = self.build_attendance_rows(user, month)
+                corrections = SB.select(TABLES["attendance_corrections"], order="created_at.desc", limit=200)
+                employees = SB.select_in(TABLES["employees"], "id", [x.get("employee_id") for x in corrections], columns="id,code,name,role")
+                correction_rows = add_people(corrections, employees)
+                pending_overtime = [x for x in history if x.get("overtime_status") == "Chờ duyệt"]
+                pending_risk = [x for x in history if x.get("review_status") == "Chờ duyệt" or x.get("risk_level") == "Cao"]
+                settings_rows = SB.select(TABLES["settings"], filters={"id": "eq.1"}, limit=1)
+                return self.ok({"history": history, "corrections": correction_rows, "pending_overtime": pending_overtime, "pending_risk": pending_risk, "settings": settings_rows[0] if settings_rows else {}})
             start, end = month_bounds(month)
             data = parallel_calls(
                 today_shifts=lambda: SB.select(TABLES["shifts"],
                                                filters={"employee_id": f"eq.{user['employee_id']}", "shift_date": f"eq.{today_text()}"},
                                                order="start_time.asc",
+                                               columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"),
+                correction_shifts=lambda: SB.select(TABLES["shifts"],
+                                               filters={"employee_id": f"eq.{user['employee_id']}", "shift_date": f"gte.{start}", "and": f"(shift_date.lt.{end})"},
+                                               order="shift_date.desc,start_time.desc",
                                                columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"),
                 attendance=lambda: SB.select(TABLES["attendance"],
                                              filters={"employee_id": f"eq.{user['employee_id']}", "work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"},
@@ -1469,16 +1752,19 @@ class RumiHandler(BaseHTTPRequestHandler):
             shift_ids = [x.get("shift_id") for x in data["attendance"]]
             history_shifts = SB.select_in(TABLES["shifts"], "id", shift_ids,
                                           columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note")
-            all_shifts = {integer(x.get("id")): x for x in history_shifts + data["today_shifts"]}
+            all_shifts = {integer(x.get("id")): x for x in history_shifts + data["today_shifts"] + data["correction_shifts"]}
             enriched = self.enriched_shifts(list(all_shifts.values()), employees=[user.get("employee") or {}],
                                             locations=data["locations"], attendance=data["attendance"])
             shift_map = {integer(x.get("id")): x for x in enriched}
             history = add_people(data["attendance"], [user.get("employee") or {}])
             for item in history:
                 item["shift"] = shift_map.get(integer(item.get("shift_id")))
+            corrections = SB.select(TABLES["attendance_corrections"], filters={"employee_id": f"eq.{user['employee_id']}"}, order="created_at.desc", limit=100)
             return self.ok({
                 "today_shifts": [shift_map.get(integer(x.get("id")), x) for x in data["today_shifts"]],
+                "correction_shifts": [shift_map.get(integer(x.get("id")), x) for x in data["correction_shifts"]],
                 "history": history,
+                "corrections": corrections,
                 "settings": data["settings"][0] if data["settings"] else {},
             })
 
@@ -1506,6 +1792,10 @@ class RumiHandler(BaseHTTPRequestHandler):
                 account = u_map.get(integer(employee.get("id")), {})
                 employee["username"] = account.get("username")
                 employee["account_active"] = account.get("active", False)
+                employee["must_change_password"] = bool(account.get("must_change_password"))
+                employee["locked_until"] = account.get("locked_until")
+                employee["last_login_at"] = account.get("last_login_at")
+                employee["failed_login_count"] = integer(account.get("failed_login_count"))
             return self.ok(employees)
 
         if path == "/api/locations":
@@ -1684,52 +1974,128 @@ class RumiHandler(BaseHTTPRequestHandler):
             raise APIError("Không cho phép tự tạo tài khoản admin. Admin đã được cấu hình sẵn trên máy chủ.", 403)
 
         if path == "/api/auth/login":
-            ip = self.client_address[0]
-            now = time.time()
-            LOGIN_ATTEMPTS[ip] = [x for x in LOGIN_ATTEMPTS[ip] if now - x < 600]
-            if len(LOGIN_ATTEMPTS[ip]) >= 8:
-                raise APIError("Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau.", 429)
             username = str(body.get("username", "")).strip().lower()
             password = str(body.get("password", ""))
-            users = SB.select(TABLES["users"], filters={"username": f"eq.{username}"}, limit=1)
-            if not users or not users[0].get("active") or not verify_password(password, users[0].get("password_hash", ""), users[0].get("password_salt", "")):
-                LOGIN_ATTEMPTS[ip].append(now)
+            throttle_key = hash_secret(f"{username}|{self.client_ip()}", "login-throttle")
+            throttle_rows = SB.select(TABLES["login_throttles"], filters={"key_hash": f"eq.{throttle_key}"}, limit=1)
+            if throttle_rows:
+                locked_until = parse_iso_datetime(throttle_rows[0].get("locked_until"))
+                if locked_until and locked_until > utc_now():
+                    raise APIError(f"Đăng nhập tạm khóa. Thử lại sau khoảng {minutes_until(throttle_rows[0].get('locked_until'))} phút.", 429)
+
+            users = SB.select(TABLES["users"], filters={"username": f"eq.{username}"}, limit=1,
+                              columns="id,username,password_hash,password_salt,password_iterations,must_change_password,password_changed_at,role,employee_id,active,last_login_at,locked_until,failed_login_count")
+            user = users[0] if users else None
+            user_locked = parse_iso_datetime(user.get("locked_until")) if user else None
+            valid = bool(user and user.get("active") and (not user_locked or user_locked <= utc_now()) and
+                         verify_password(password, user.get("password_hash", ""), user.get("password_salt", ""), integer(user.get("password_iterations"), 210_000)))
+            if not valid:
+                result = SB.rpc("rumi_auth_register_failure", {
+                    "p_key_hash": throttle_key,
+                    "p_user_id": integer(user.get("id")) if user else None,
+                    "p_now": now_iso(),
+                })
+                if result and result.get("locked"):
+                    raise APIError(f"Đăng nhập sai nhiều lần. Tài khoản tạm khóa {result.get('retry_after_minutes', 15)} phút.", 429)
                 raise APIError("Tên đăng nhập hoặc mật khẩu không đúng", 401)
-            user = users[0]
+
             employee = None
             if user.get("employee_id"):
                 rows = SB.select(TABLES["employees"], filters={"id": f"eq.{user['employee_id']}"}, limit=1)
                 employee = rows[0] if rows else None
                 if user.get("role") == "employee" and (not employee or employee.get("status") != "Đang làm"):
                     raise APIError("Tài khoản nhân viên đã bị khóa", 403)
-            SB.update(TABLES["users"], {"last_login_at": now_iso()}, {"id": f"eq.{user['id']}"})
-            LOGIN_ATTEMPTS[ip].clear()
+
+            updates = {
+                "last_login_at": now_iso(),
+                "last_login_ip_hash": self.ip_hash(),
+                "last_login_user_agent_hash": self.user_agent_hash(),
+                "failed_login_count": 0,
+                "locked_until": None,
+                "last_failed_login_at": None,
+            }
+            old_iterations = integer(user.get("password_iterations"), 210_000)
+            if old_iterations < PASSWORD_ITERATIONS:
+                upgraded_hash, upgraded_salt = password_hash(password, iterations=PASSWORD_ITERATIONS)
+                updates.update({"password_hash": upgraded_hash, "password_salt": upgraded_salt, "password_iterations": PASSWORD_ITERATIONS})
+                user.update(updates)
+            SB.update(TABLES["users"], updates, {"id": f"eq.{user['id']}"})
+            SB.rpc("rumi_auth_clear_failures", {"p_key_hash": throttle_key, "p_user_id": user["id"], "p_now": now_iso()})
+            token, session = self.create_db_session(integer(user["id"]))
+            user.update(updates)
             profile = public_user(user, employee)
             user["profile"] = profile
             user["employee"] = employee
-            USER_CACHE.set(integer(user["id"]), user, 20)
-            dashboard = self.build_dashboard(user)
-            token = make_session(integer(user["id"]))
-            return self.ok({"user": profile, "dashboard": dashboard, "unread_count": dashboard.get("unread_count", 0)},
+            user["session"] = session
+            dashboard = None if user.get("must_change_password") else self.build_dashboard(user)
+            self.audit(user, "login", "security", user["id"], {"device": self.device_label()})
+            return self.ok({"user": profile, "dashboard": dashboard, "unread_count": (dashboard or {}).get("unread_count", 0)},
                            "Đăng nhập thành công", headers={"Set-Cookie": self.session_header(token)})
 
         if path == "/api/auth/logout":
+            current = self.current_user(required=False)
+            self.revoke_current_session("Đăng xuất")
+            if current:
+                self.audit(current, "logout", "security", current.get("id"))
             return self.ok(None, "Đã đăng xuất", headers={"Set-Cookie": self.session_header("", 0)})
 
         user = self.current_user()
-        self.require_csrf()
+        self.require_password_changed(user, path)
 
         if path == "/api/auth/change-password":
             old_password = str(body.get("old_password", ""))
             new_password = str(body.get("new_password", ""))
-            if len(new_password) < 8:
-                raise APIError("Mật khẩu mới phải có ít nhất 8 ký tự")
-            if not verify_password(old_password, user.get("password_hash", ""), user.get("password_salt", "")):
+            confirm_password = str(body.get("confirm_password", new_password))
+            if new_password != confirm_password:
+                raise APIError("Xác nhận mật khẩu mới không khớp")
+            if not verify_password(old_password, user.get("password_hash", ""), user.get("password_salt", ""), integer(user.get("password_iterations"), 210_000)):
                 raise APIError("Mật khẩu hiện tại không đúng")
-            hashed, salt = password_hash(new_password)
-            SB.update(TABLES["users"], {"password_hash": hashed, "password_salt": salt}, {"id": f"eq.{user['id']}"})
-            self.audit(user, "change_password", "user", user["id"])
-            return self.ok(None, "Đã đổi mật khẩu")
+            validate_password_policy(new_password, user.get("username", ""), admin=user.get("role") == "admin")
+            if password_reused(integer(user["id"]), new_password, user):
+                raise APIError("Không được dùng lại một trong các mật khẩu gần đây")
+            SB.insert(TABLES["password_history"], {
+                "user_id": user["id"],
+                "password_hash": user.get("password_hash", ""),
+                "password_salt": user.get("password_salt", ""),
+                "password_iterations": integer(user.get("password_iterations"), 210_000),
+            })
+            old_history = SB.select(TABLES["password_history"], filters={"user_id": f"eq.{user['id']}"}, order="created_at.desc", columns="id", limit=20)
+            for stale in old_history[5:]:
+                SB.delete(TABLES["password_history"], {"id": f"eq.{stale['id']}"})
+            hashed, salt = password_hash(new_password, iterations=PASSWORD_ITERATIONS)
+            SB.update(TABLES["users"], {
+                "password_hash": hashed,
+                "password_salt": salt,
+                "password_iterations": PASSWORD_ITERATIONS,
+                "must_change_password": False,
+                "password_changed_at": now_iso(),
+                "failed_login_count": 0,
+                "locked_until": None,
+            }, {"id": f"eq.{user['id']}"})
+            current_session_id = integer((user.get("session") or {}).get("id"))
+            SB.update(TABLES["auth_sessions"], {"revoked_at": now_iso(), "revoke_reason": "Đổi mật khẩu"},
+                      {"user_id": f"eq.{user['id']}", "revoked_at": "is.null"})
+            token, _session = self.create_db_session(integer(user["id"]))
+            self.audit(user, "change_password", "security", user["id"], {"revoked_session_id": current_session_id})
+            return self.ok({"must_change_password": False}, "Đã đổi mật khẩu và đăng xuất các phiên khác",
+                           headers={"Set-Cookie": self.session_header(token)})
+
+        if path == "/api/auth/logout-all":
+            SB.update(TABLES["auth_sessions"], {"revoked_at": now_iso(), "revoke_reason": "Đăng xuất tất cả thiết bị"},
+                      {"user_id": f"eq.{user['id']}", "revoked_at": "is.null"})
+            self.audit(user, "logout_all", "security", user["id"])
+            return self.ok(None, "Đã đăng xuất tất cả thiết bị", headers={"Set-Cookie": self.session_header("", 0)})
+
+        if path == "/api/auth/session/revoke":
+            session_id = integer(body.get("session_id"))
+            rows = SB.update(TABLES["auth_sessions"], {"revoked_at": now_iso(), "revoke_reason": "Người dùng thu hồi"},
+                             {"id": f"eq.{session_id}", "user_id": f"eq.{user['id']}", "revoked_at": "is.null"})
+            if not rows:
+                raise APIError("Không tìm thấy phiên đăng nhập", 404)
+            is_current = session_id == integer((user.get("session") or {}).get("id"))
+            self.audit(user, "revoke_session", "security", session_id)
+            headers = {"Set-Cookie": self.session_header("", 0)} if is_current else None
+            return self.ok({"current": is_current}, "Đã thu hồi phiên đăng nhập", headers=headers)
 
         if path == "/api/notifications/read":
             notification_id = integer(body.get("id"))
@@ -1751,8 +2117,9 @@ class RumiHandler(BaseHTTPRequestHandler):
             name = str(body.get("name", "")).strip()
             username = str(body.get("username", "")).strip().lower()
             password = str(body.get("password", ""))
-            if not code or len(name) < 2 or not re.fullmatch(r"[a-z0-9._-]{3,40}", username) or len(password) < 8:
-                raise APIError("Vui lòng nhập đủ mã, họ tên, tên đăng nhập và mật khẩu ít nhất 8 ký tự")
+            if not code or len(name) < 2 or not re.fullmatch(r"[a-z0-9._-]{3,40}", username):
+                raise APIError("Vui lòng nhập đủ mã, họ tên và tên đăng nhập hợp lệ")
+            validate_password_policy(password, username)
             employee = SB.insert(TABLES["employees"], {
                 "code": code,
                 "name": name,
@@ -1770,11 +2137,14 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "joined_at": body.get("joined_at") or today_text(),
             })
             try:
-                hashed, salt = password_hash(password)
+                hashed, salt = password_hash(password, iterations=PASSWORD_ITERATIONS)
                 SB.insert(TABLES["users"], {
                     "username": username,
                     "password_hash": hashed,
                     "password_salt": salt,
+                    "password_iterations": PASSWORD_ITERATIONS,
+                    "must_change_password": True,
+                    "password_changed_at": None,
                     "role": "employee",
                     "employee_id": employee["id"],
                     "active": True,
@@ -1790,14 +2160,25 @@ class RumiHandler(BaseHTTPRequestHandler):
             self.require_role(user, "admin")
             employee_id = integer(reset_match.group(1))
             new_password = str(body.get("password", ""))
-            if len(new_password) < 8:
-                raise APIError("Mật khẩu mới phải có ít nhất 8 ký tự")
-            hashed, salt = password_hash(new_password)
-            rows = SB.update(TABLES["users"], {"password_hash": hashed, "password_salt": salt}, {"employee_id": f"eq.{employee_id}"})
-            if not rows:
+            accounts = SB.select(TABLES["users"], filters={"employee_id": f"eq.{employee_id}"}, limit=1, columns="id,username")
+            if not accounts:
                 raise APIError("Nhân viên chưa có tài khoản", 404)
+            account = accounts[0]
+            validate_password_policy(new_password, account.get("username", ""))
+            hashed, salt = password_hash(new_password, iterations=PASSWORD_ITERATIONS)
+            SB.update(TABLES["users"], {
+                "password_hash": hashed,
+                "password_salt": salt,
+                "password_iterations": PASSWORD_ITERATIONS,
+                "must_change_password": True,
+                "password_changed_at": now_iso(),
+                "failed_login_count": 0,
+                "locked_until": None,
+            }, {"id": f"eq.{account['id']}"})
+            SB.update(TABLES["auth_sessions"], {"revoked_at": now_iso(), "revoke_reason": "Admin đặt lại mật khẩu"},
+                      {"user_id": f"eq.{account['id']}", "revoked_at": "is.null"})
             self.audit(user, "reset_password", "employee", employee_id)
-            return self.ok(None, "Đã đặt lại mật khẩu")
+            return self.ok(None, "Đã đặt lại mật khẩu; nhân viên phải đổi ở lần đăng nhập tiếp theo")
 
         if path == "/api/locations":
             self.require_role(user, "admin")
@@ -2239,19 +2620,169 @@ class RumiHandler(BaseHTTPRequestHandler):
         if path == "/api/attendance/clock":
             self.require_role(user, "employee")
             shift_id = integer(body.get("shift_id"))
+            action = str(body.get("action", "auto")).strip().lower()
+            latitude = num(body.get("latitude"), 999)
+            longitude = num(body.get("longitude"), 999)
             accuracy = num(body.get("accuracy"), 99999)
-            result = SB.rpc("rumi_clock_shift", {
+            client_time = str(body.get("position_timestamp") or body.get("client_time") or "").strip()
+            device_raw = str(body.get("device_id") or "").strip()[:200]
+            device_hash = hash_secret(device_raw, "attendance-device") if device_raw else ""
+            rpc_body = {
                 "p_shift_id": shift_id,
                 "p_employee_id": user["employee_id"],
-                "p_action": str(body.get("action", "auto")),
-                "p_lat": num(body.get("latitude"), 999),
-                "p_lng": num(body.get("longitude"), 999),
+                "p_action": action,
+                "p_lat": latitude,
+                "p_lng": longitude,
                 "p_accuracy": accuracy,
+                "p_device_hash": device_hash,
+                "p_client_time": client_time or None,
+                "p_ip_hash": self.ip_hash(),
                 "p_now": now_iso(),
-            })
+            }
+            try:
+                result = SB.rpc("rumi_clock_shift_v55", rpc_body)
+            except APIError as exc:
+                try:
+                    SB.insert(TABLES["attendance_events"], {
+                        "shift_id": shift_id or None,
+                        "employee_id": user.get("employee_id"),
+                        "action": action or "auto",
+                        "success": False,
+                        "reason": str(exc)[:500],
+                        "latitude": latitude if -90 <= latitude <= 90 else None,
+                        "longitude": longitude if -180 <= longitude <= 180 else None,
+                        "accuracy_m": accuracy if accuracy < 99999 else None,
+                        "device_id_hash": device_hash,
+                        "ip_hash": self.ip_hash(),
+                        "client_position_at": client_time or None,
+                    })
+                except Exception:
+                    pass
+                self.audit(user, "clock_rejected", "attendance", shift_id, {"action": action, "reason": str(exc)[:200]})
+                raise
             message = "Chấm công vào ca thành công" if result.get("action") == "checkin" else "Chấm công ra ca thành công"
-            self.audit(user, result.get("action", "clock"), "attendance", shift_id, {"distance_m": result.get("distance_m")})
+            if result.get("risk_level") == "Cao" or result.get("review_status") == "Chờ duyệt":
+                self.notify_role("admin", "Chấm công cần kiểm tra", f"{user['profile']['name']} có lượt chấm công rủi ro cao tại ca #{shift_id}.", "warning", "attendance")
+            self.audit(user, result.get("action", "clock"), "attendance", shift_id, {
+                "distance_m": result.get("distance_m"), "accuracy_m": result.get("accuracy_m"),
+                "risk_level": result.get("risk_level"),
+            })
             return self.ok(result, message)
+
+        if path == "/api/attendance/corrections":
+            self.require_role(user, "employee")
+            shift_id = integer(body.get("shift_id"))
+            reason = str(body.get("reason", "")).strip()
+            requested_in = parse_time(body.get("requested_check_in"), "Giờ vào đề nghị") if body.get("requested_check_in") else None
+            requested_out = parse_time(body.get("requested_check_out"), "Giờ ra đề nghị") if body.get("requested_check_out") else None
+            if not shift_id or len(reason) < 5:
+                raise APIError("Vui lòng chọn ca và nhập lý do ít nhất 5 ký tự")
+            shifts = SB.select(TABLES["shifts"], filters={"id": f"eq.{shift_id}", "employee_id": f"eq.{user['employee_id']}"}, limit=1)
+            if not shifts:
+                raise APIError("Không tìm thấy ca làm của bạn", 404)
+            shift_day = datetime.strptime(str(shifts[0]["shift_date"])[:10], "%Y-%m-%d").date()
+            if shift_day > date.today():
+                raise APIError("Không thể yêu cầu sửa chấm công cho ca chưa diễn ra")
+            if shift_day < date.today() - timedelta(days=62):
+                raise APIError("Chỉ tiếp nhận yêu cầu sửa chấm công trong 62 ngày gần nhất")
+            attendance = SB.select(TABLES["attendance"], filters={"shift_id": f"eq.{shift_id}"}, limit=1)
+            row = SB.insert(TABLES["attendance_corrections"], {
+                "attendance_id": attendance[0].get("id") if attendance else None,
+                "shift_id": shift_id,
+                "employee_id": user["employee_id"],
+                "requested_check_in": requested_in,
+                "requested_check_out": requested_out,
+                "reason": reason,
+                "status": "Chờ duyệt",
+            })
+            self.notify_role("admin", "Có yêu cầu sửa chấm công", f"{user['profile']['name']} gửi yêu cầu sửa ca ngày {shifts[0]['shift_date']}.", "attendance", "attendance")
+            self.audit(user, "request_correction", "attendance", shift_id, {"request_id": row.get("id")})
+            return self.ok(row, "Đã gửi yêu cầu sửa chấm công")
+
+        if path == "/api/attendance/corrections/review":
+            self.require_role(user, "admin")
+            request_id = integer(body.get("id"))
+            status = str(body.get("status", "")).strip()
+            admin_note = str(body.get("admin_note", "")).strip()
+            requests = SB.select(TABLES["attendance_corrections"], filters={"id": f"eq.{request_id}"}, limit=1)
+            if not requests:
+                raise APIError("Không tìm thấy yêu cầu sửa chấm công", 404)
+            request_row = requests[0]
+            if request_row.get("status") != "Chờ duyệt":
+                raise APIError("Yêu cầu này đã được xử lý")
+            if status not in {"Đã duyệt", "Từ chối"}:
+                raise APIError("Trạng thái xử lý không hợp lệ")
+            if status == "Đã duyệt":
+                shifts = SB.select(TABLES["shifts"], filters={"id": f"eq.{request_row['shift_id']}"}, limit=1)
+                if not shifts:
+                    raise APIError("Ca làm không còn tồn tại", 404)
+                shift = shifts[0]
+                current = SB.select(TABLES["attendance"], filters={"shift_id": f"eq.{request_row['shift_id']}"}, limit=1)
+                existing = current[0] if current else {}
+                check_in = normalize_time(request_row.get("requested_check_in")) or normalize_time(existing.get("check_in"))
+                check_out = normalize_time(request_row.get("requested_check_out")) or normalize_time(existing.get("check_out"))
+                if not check_in:
+                    raise APIError("Yêu cầu chưa có giờ vào hợp lệ")
+                metrics = attendance_metrics(shift, check_in, check_out)
+                SB.upsert(TABLES["attendance"], {
+                    "shift_id": shift["id"], "employee_id": shift["employee_id"], "work_date": shift["shift_date"],
+                    "check_in": check_in, "check_out": check_out,
+                    "hours": metrics["payable_hours"], "scheduled_hours": metrics["scheduled_hours"],
+                    "scheduled_minutes": metrics["scheduled_minutes"], "worked_minutes": metrics["worked_minutes"],
+                    "base_payable_minutes": metrics["base_payable_minutes"], "payable_minutes": metrics["payable_minutes"],
+                    "payable_hours": metrics["payable_hours"], "late_minutes": metrics["late_minutes"],
+                    "early_leave_minutes": metrics["early_leave_minutes"], "overtime_minutes": metrics["overtime_minutes"],
+                    "overtime_requested_minutes": metrics["overtime_requested_minutes"],
+                    "overtime_approved_minutes": metrics["overtime_approved_minutes"],
+                    "overtime_status": metrics["overtime_status"], "status": metrics["status"],
+                    "calculation_note": metrics["calculation_note"], "review_status": "Đã duyệt",
+                    "reviewed_by": user["id"], "reviewed_at": now_iso(),
+                    "note": admin_note or "Điều chỉnh theo yêu cầu nhân viên",
+                }, "shift_id")
+            SB.update(TABLES["attendance_corrections"], {
+                "status": status, "admin_note": admin_note, "reviewed_by": user["id"], "reviewed_at": now_iso(),
+            }, {"id": f"eq.{request_id}"})
+            self.notify_employee(integer(request_row["employee_id"]), "Yêu cầu sửa chấm công đã xử lý", f"Trạng thái: {status}. {admin_note}".strip(), "attendance", "attendance")
+            self.audit(user, "review_correction", "attendance", request_row.get("shift_id"), {"request_id": request_id, "status": status})
+            return self.ok(None, "Đã xử lý yêu cầu sửa chấm công")
+
+        if path == "/api/attendance/overtime/review":
+            self.require_role(user, "admin")
+            attendance_id = integer(body.get("attendance_id"))
+            approved_minutes = max(0, integer(body.get("approved_minutes"), 0))
+            result = SB.rpc("rumi_review_overtime_v55", {
+                "p_attendance_id": attendance_id,
+                "p_approved_minutes": approved_minutes,
+                "p_admin_user_id": user["id"],
+                "p_note": str(body.get("note", "")).strip(),
+            })
+            rows = SB.select(TABLES["attendance"], filters={"id": f"eq.{attendance_id}"}, limit=1, columns="employee_id,work_date")
+            if rows:
+                self.notify_employee(integer(rows[0].get("employee_id")), "Tăng ca đã được xử lý", f"Ngày {rows[0].get('work_date')}: duyệt {result.get('approved_minutes', 0)} phút.", "attendance", "attendance")
+            self.audit(user, "review_overtime", "attendance", attendance_id, result)
+            return self.ok(result, "Đã cập nhật thời gian tăng ca")
+
+        if path == "/api/attendance/risk/review":
+            self.require_role(user, "admin")
+            attendance_id = integer(body.get("attendance_id"))
+            status = str(body.get("status", "")).strip()
+            note = str(body.get("note", "")).strip()
+            if status not in {"Đã duyệt", "Từ chối"}:
+                raise APIError("Trạng thái duyệt rủi ro không hợp lệ")
+            updates = {
+                "review_status": status,
+                "reviewed_by": user["id"],
+                "reviewed_at": now_iso(),
+                "note": note,
+            }
+            if status == "Từ chối":
+                updates.update({"payable_minutes": 0, "payable_hours": 0, "hours": 0, "status": "Từ chối chấm công"})
+            rows = SB.update(TABLES["attendance"], updates, {"id": f"eq.{attendance_id}"})
+            if not rows:
+                raise APIError("Không tìm thấy lượt chấm công", 404)
+            self.notify_employee(integer(rows[0].get("employee_id")), "Lượt chấm công đã được kiểm tra", f"Kết quả: {status}. {note}".strip(), "attendance", "attendance")
+            self.audit(user, "review_risk", "attendance", attendance_id, {"status": status})
+            return self.ok(rows[0], "Đã xử lý lượt chấm công rủi ro")
 
         if path == "/api/attendance/manual":
             self.require_role(user, "admin")
@@ -2262,14 +2793,19 @@ class RumiHandler(BaseHTTPRequestHandler):
             shift = shifts[0]
             check_in = parse_time(body.get("check_in"), "Giờ vào")
             check_out = parse_time(body.get("check_out"), "Giờ ra") if body.get("check_out") else None
-            metrics = attendance_metrics(shift, check_in, check_out)
+            approve_overtime = str(body.get("approve_overtime", "false")).lower() in {"1","true","yes","on"}
+            metrics = attendance_metrics(shift, check_in, check_out, approve_overtime=approve_overtime)
             row = SB.upsert(TABLES["attendance"], {
                 "shift_id": shift_id, "employee_id": shift["employee_id"], "work_date": shift["shift_date"],
                 "check_in": check_in, "check_out": check_out, "hours": metrics["payable_hours"],
+                "scheduled_minutes": metrics["scheduled_minutes"], "worked_minutes": metrics["worked_minutes"],
+                "base_payable_minutes": metrics["base_payable_minutes"], "payable_minutes": metrics["payable_minutes"],
                 "scheduled_hours": metrics["scheduled_hours"], "payable_hours": metrics["payable_hours"],
                 "late_minutes": metrics["late_minutes"], "early_leave_minutes": metrics["early_leave_minutes"],
-                "overtime_minutes": metrics["overtime_minutes"], "status": metrics["status"],
-                "calculation_note": metrics["calculation_note"],
+                "overtime_minutes": metrics["overtime_minutes"], "overtime_requested_minutes": metrics["overtime_requested_minutes"],
+                "overtime_approved_minutes": metrics["overtime_approved_minutes"], "overtime_status": metrics["overtime_status"],
+                "status": metrics["status"], "calculation_note": metrics["calculation_note"],
+                "review_status": "Đã duyệt", "reviewed_by": user["id"], "reviewed_at": now_iso(),
                 "note": str(body.get("note", "Điều chỉnh bởi quản lý")).strip(),
             }, "shift_id")
             self.audit(user, "manual_update", "attendance", row.get("id"), {"shift_id": shift_id})
@@ -2389,7 +2925,7 @@ class RumiHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def handle_api_put(self, path: str, body: dict):
         user = self.current_user()
-        self.require_csrf()
+        self.require_password_changed(user, path)
 
         match = re.fullmatch(r"/api/employees/(\d+)", path)
         if match:
@@ -2450,8 +2986,14 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "checkin_before_minutes": integer(body.get("checkin_before_minutes"), 15),
                 "checkin_after_minutes": integer(body.get("checkin_after_minutes"), 5),
                 "checkout_before_minutes": integer(body.get("checkout_before_minutes"), 5),
-                "checkout_after_minutes": integer(body.get("checkout_after_minutes"), 5),
-                "max_gps_accuracy_m": integer(body.get("max_gps_accuracy_m"), 150),
+                "checkout_after_minutes": integer(body.get("checkout_after_minutes"), 180),
+                "max_gps_accuracy_m": integer(body.get("max_gps_accuracy_m"), 80),
+                "late_grace_minutes": integer(body.get("late_grace_minutes"), 5),
+                "early_leave_grace_minutes": integer(body.get("early_leave_grace_minutes"), 5),
+                "max_overtime_minutes": integer(body.get("max_overtime_minutes"), 180),
+                "overtime_requires_approval": str(body.get("overtime_requires_approval", "true")).lower() in {"1","true","yes","on"},
+                "location_freshness_seconds": integer(body.get("location_freshness_seconds"), 120),
+                "min_clock_gap_minutes": integer(body.get("min_clock_gap_minutes"), 1),
             }, "id")
             self.audit(user, "update", "settings", 1)
             return self.ok(row, "Đã cập nhật quy định chấm công")
@@ -2480,7 +3022,7 @@ class RumiHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def handle_api_delete(self, path: str):
         user = self.current_user()
-        self.require_csrf()
+        self.require_password_changed(user, path)
 
         match = re.fullmatch(r"/api/employees/(\d+)", path)
         if match:
@@ -2543,8 +3085,6 @@ def ensure_configured_admin() -> dict:
     """
     if not re.fullmatch(r"[a-z0-9._-]{3,40}", ADMIN_USERNAME):
         raise APIError("RUMI_ADMIN_USERNAME không hợp lệ. Dùng 3-40 ký tự a-z, 0-9, dấu chấm, gạch dưới hoặc gạch ngang.")
-    if len(ADMIN_PASSWORD) < 8:
-        raise APIError("RUMI_ADMIN_PASSWORD phải có ít nhất 8 ký tự.")
     rows = SB.select(TABLES["users"], filters={"username": f"eq.{ADMIN_USERNAME}"}, limit=1)
     if rows:
         admin = rows[0]
@@ -2554,16 +3094,30 @@ def ensure_configured_admin() -> dict:
         if not admin.get("active"):
             updates["active"] = True
         if ADMIN_RESET_ON_START:
-            hashed, salt = password_hash(ADMIN_PASSWORD)
-            updates.update({"password_hash": hashed, "password_salt": salt})
+            validate_password_policy(ADMIN_PASSWORD, ADMIN_USERNAME, admin=True)
+            hashed, salt = password_hash(ADMIN_PASSWORD, iterations=PASSWORD_ITERATIONS)
+            updates.update({
+                "password_hash": hashed, "password_salt": salt,
+                "password_iterations": PASSWORD_ITERATIONS,
+                "must_change_password": False,
+                "password_changed_at": now_iso(),
+                "failed_login_count": 0,
+                "locked_until": None,
+            })
+            SB.update(TABLES["auth_sessions"], {"revoked_at": now_iso(), "revoke_reason": "Admin đặt lại mật khẩu"},
+                      {"user_id": f"eq.{admin['id']}", "revoked_at": "is.null"})
         if updates:
             admin = SB.update(TABLES["users"], updates, {"id": f"eq.{admin['id']}"})[0]
         return admin
-    hashed, salt = password_hash(ADMIN_PASSWORD)
+    validate_password_policy(ADMIN_PASSWORD, ADMIN_USERNAME, admin=True)
+    hashed, salt = password_hash(ADMIN_PASSWORD, iterations=PASSWORD_ITERATIONS)
     return SB.insert(TABLES["users"], {
         "username": ADMIN_USERNAME,
         "password_hash": hashed,
         "password_salt": salt,
+        "password_iterations": PASSWORD_ITERATIONS,
+        "must_change_password": False,
+        "password_changed_at": now_iso(),
         "role": "admin",
         "employee_id": None,
         "active": True,
@@ -2600,7 +3154,7 @@ def main() -> None:
         raise SystemExit(2) from exc
     server = ThreadingHTTPServer((host, port), RumiHandler)
     print("=" * 68)
-    print("RUMI Manager v5.4 SHIFT MARKET đang chạy")
+    print("RUMI Manager v5.5 SECURITY & SMART ATTENDANCE đang chạy")
     print(f"Mở trên máy này: http://localhost:{port}")
     print(f"Tài khoản admin: {ADMIN_USERNAME}")
     if os.environ.get("RUMI_ADMIN_PASSWORD"):

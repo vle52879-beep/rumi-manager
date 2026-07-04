@@ -1,17 +1,30 @@
-# RUMI Manager 5.4 SHIFT MARKET
+# RUMI Manager 5.5 — Security & Smart Attendance
 
-Bản quản lý nhân viên quán trà sữa dùng chung Supabase với IC3 Smart Class nhưng chỉ sử dụng bảng `rumi_*`.
+Bản nâng cấp bảo mật tài khoản và chấm công logic cho RUMI Manager. Hệ thống vẫn dùng chung Supabase của IC3 Smart Class nhưng chỉ tạo/sửa bảng và hàm có tiền tố `rumi_`.
 
-## Tính năng chính
+## Bảo mật tài khoản
 
-- Admin đăng nhu cầu ca làm theo ngày, giờ, cửa hàng, vị trí và số người cần.
-- Nhân viên Full-time/Part-time đăng ký ca đang mở.
-- Admin duyệt, đưa vào danh sách chờ hoặc từ chối từng đơn.
-- Khi duyệt đơn, hệ thống tự tạo ca chính thức và gửi thông báo.
-- Khi chốt ca, hệ thống từ chối các đơn còn lại.
-- Full-time đăng ký ngày nghỉ ưu tiên; admin duyệt và xếp tự động các ngày còn lại.
-- Chặn trùng ca, nghỉ phép, ngày nghỉ tuần, quá giờ/ngày, quá giờ/tuần và quá số ngày làm liên tiếp.
-- Cảnh báo Full-time thiếu giờ, làm quá 6 ngày hoặc chưa có ngày nghỉ.
-- Chấm công GPS, bảng công, bảng lương tháng và xuất Excel lịch tuần giữ nguyên.
+- Mật khẩu PBKDF2-HMAC-SHA256 600.000 vòng, salt riêng và pepper phía backend tùy chọn.
+- Nhân viên dùng mật khẩu tạm do admin cấp và bắt buộc đổi ở lần đăng nhập đầu.
+- Kiểm tra độ mạnh, chặn mật khẩu phổ biến, tên đăng nhập và 5 mật khẩu gần nhất.
+- Khóa đăng nhập 15 phút sau 5 lần sai; 60 phút sau 10 lần sai.
+- Phiên đăng nhập ngẫu nhiên lưu dạng hash trong CSDL, cookie `HttpOnly`, `Secure`, `SameSite=Strict`.
+- Tự hết phiên sau 2 giờ không hoạt động hoặc 12 giờ tuyệt đối.
+- Trang quản lý thiết bị đăng nhập, thu hồi từng thiết bị hoặc đăng xuất tất cả.
+- Đổi/reset mật khẩu sẽ thu hồi các phiên cũ.
+- CSRF/origin protection, CSP, HSTS và các security header.
 
-Xem hướng dẫn triển khai trong [UPGRADE_V54.md](UPGRADE_V54.md).
+## Chấm công thông minh
+
+- Lấy nhiều mẫu GPS và chọn mẫu có sai số tốt nhất.
+- GPS phải mới, đủ chính xác, đúng bán kính cửa hàng và đúng khung giờ ca.
+- Giờ máy chủ là nguồn thời gian chuẩn; đổi giờ trên điện thoại không ảnh hưởng.
+- Phát hiện thiết bị vừa chấm công cho nhiều tài khoản và đánh dấu rủi ro.
+- Vào sớm không cộng thêm lương; đi trễ/về sớm tính theo phút thực tế.
+- Phút sau giờ kết thúc là tăng ca chờ admin duyệt, chưa duyệt không cộng lương.
+- Nhân viên gửi yêu cầu sửa chấm công; admin duyệt hoặc từ chối.
+- Bảng công, bảng lương tháng và xuất Excel tiếp tục dùng `payable_hours` đã duyệt.
+
+## Nâng cấp
+
+Đọc [UPGRADE_V55.md](UPGRADE_V55.md).
