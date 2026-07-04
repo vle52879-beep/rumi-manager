@@ -1,34 +1,51 @@
-# RUMI Manager v4.5 — Vercel + Supabase
+# RUMI Manager 5.0 — Vercel + Supabase
 
-Bản này triển khai giống IC3 SmartClass: mã nguồn trên GitHub, tự động deploy lên
-Vercel và dùng chung dự án Supabase nhưng chỉ thao tác các bảng có tiền tố
-`rumi_`.
+Bản nâng cấp giao diện và trải nghiệm vận hành cho quán trà sữa RUMI.
 
-## Chạy cục bộ
+## Điểm mới
+
+- Dashboard ưu tiên việc cần xử lý và thao tác nhanh.
+- Lịch làm dạng tuần cho admin và nhân viên.
+- Tìm kiếm, lọc theo trạng thái/vị trí/nhóm nguyên liệu.
+- Xuất CSV: nhân viên, lịch làm, bảng công, bảng lương, tồn kho, lịch sử lấy hàng, cần mua và báo cáo.
+- Chấm công GPS có bước kiểm tra độ chính xác trước khi vào/ra ca.
+- Giao diện responsive, bảng tự chuyển thành thẻ trên điện thoại.
+- Thanh điều hướng dưới màn hình trên mobile.
+- Tìm nhanh toàn hệ thống bằng nút kính lúp hoặc phím `/`.
+- Không thay đổi cấu trúc dữ liệu; tiếp tục dùng các bảng `rumi_*` trong Supabase của IC3.
+
+## Nâng cấp project đang chạy
+
+Giải nén ZIP, sau đó ghi đè mã nguồn vào repository hiện tại:
 
 ```bash
-cp .env.example .env
-python3 server.py
+cd ~/Downloads
+unzip -o RUMI-Manager-Supabase-v5.0-Vercel.zip
+
+rsync -av --delete \
+  --exclude='.git' \
+  --exclude='.env' \
+  RUMI-Manager-Supabase-v5.0-Vercel/ \
+  RUMI-Manager-Supabase-v4.4-Vercel/
+
+cd RUMI-Manager-Supabase-v4.4-Vercel
+git add -A
+git commit -m "Upgrade RUMI Manager 5.0 UI and features"
+git push
 ```
 
-## Triển khai Vercel
+Vercel sẽ tự deploy commit mới. Các Environment Variables hiện tại được giữ nguyên.
 
-Xem `DEPLOY_VERCEL.md`.
+## Kiểm tra sau deploy
 
-## Biến môi trường bắt buộc trên Vercel
+- `/login`: màn hình đăng nhập.
+- `/api/health`: trạng thái Supabase, phiên bản `5.0`.
+- Đăng nhập admin: kiểm tra Dashboard, Nhân viên, Xếp lịch, Kho và Báo cáo.
+- Đăng nhập nhân viên: kiểm tra Lịch làm, Đăng ký lịch rảnh và Chấm công GPS.
 
-- `RUMI_SUPABASE_URL`
-- `RUMI_SUPABASE_SERVICE_ROLE_KEY`
-- `RUMI_ADMIN_PASSWORD` (không dùng `Rumi@2026` khi online)
+## Kỹ thuật
 
-## Cấu trúc Vercel
-
-- `public/`: giao diện được Vercel CDN phục vụ.
-- `app.py`: Flask/WSGI adapter cho toàn bộ API.
-- `server.py`: nghiệp vụ, phân quyền và kết nối Supabase.
-- `vercel.json`, `pyproject.toml`, `requirements.txt`: cấu hình triển khai.
-
-
-## Sửa lỗi build Vercel v4.5
-
-Đã bỏ cấu hình `functions.app.py` không hợp lệ. Vercel tự nhận Flask app từ `app.py` và `pyproject.toml`.
+- Frontend: HTML/CSS/JavaScript thuần, phục vụ từ thư mục `public/` của Vercel.
+- Backend: Flask/Python Function tại `api/index.py`.
+- Database: Supabase/PostgreSQL, chỉ dùng bảng/hàm có tiền tố `rumi_`.
+- Python: 3.12 qua `.python-version`.

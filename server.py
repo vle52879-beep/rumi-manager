@@ -734,7 +734,7 @@ class RumiHandler(BaseHTTPRequestHandler):
     def handle_api_get(self, path: str, query: dict):
         if path == "/api/health":
             SB.select(TABLES["employees"], limit=1, columns="id")
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "4.4", "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "5.0", "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
