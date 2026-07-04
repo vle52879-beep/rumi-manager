@@ -40,7 +40,6 @@ def _ensure_ready() -> None:
         if _ready:
             return
         _validate_runtime_config()
-        core.SB.select(core.TABLES["users"], limit=1, columns="id")
         core.ensure_configured_admin()
         _ready = True
 

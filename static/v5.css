@@ -242,3 +242,20 @@ tbody tr:hover{background:#fff9f2}
   .hero-actions{flex-direction:column}
   .v5-command-backdrop{padding-top:18px}
 }
+
+/* RUMI 5.3 — scheduling, attendance and payroll operations */
+.v53-rank{min-width:34px;height:34px;border-radius:12px;display:grid;place-items:center;background:rgba(155,91,57,.1);color:var(--primary);font-size:12px;font-weight:800}
+.candidate.available .v53-rank{background:rgba(51,126,88,.12);color:#2f7654}
+.candidate-copy small{display:block;margin-top:4px;color:var(--muted);font-size:12px;line-height:1.4}
+.v53-dual-actions{display:grid!important;grid-template-columns:1fr 1fr;gap:10px;width:100%}
+.v53-rule-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px;padding:14px;border-radius:16px;background:rgba(155,91,57,.055);font-size:12px;color:var(--muted)}
+.v53-rule-list span{display:flex;align-items:center;gap:7px}.v53-rule-list svg{width:15px;height:15px;stroke:#367b57}
+.card-head.compact{padding:0 0 12px;border:0;margin-top:16px}
+.v53-metric{display:inline-flex;align-items:center;margin:2px 4px 2px 0;padding:4px 7px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.v53-metric.late{background:#fff0e8;color:#a14921}.v53-metric.early{background:#fff6d9;color:#8d6812}.v53-metric.overtime{background:#e8f6ef;color:#2d7452}
+.v53-payroll-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.v53-payroll-run{display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:14px;border:1px solid rgba(155,91,57,.16);border-radius:18px;background:rgba(255,250,245,.85)}
+.v53-payroll-run>span{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;background:#fff0e8;color:var(--primary)}
+.v53-payroll-run>span svg{width:20px;height:20px}.v53-payroll-run div{display:flex;flex-direction:column;gap:3px}.v53-payroll-run small{color:var(--muted)}
+.v53-payroll-run.locked{border-color:rgba(47,118,84,.22);background:#f3fbf7}.v53-payroll-run.locked>span{background:#e1f4e9;color:#2f7654}
+@media(max-width:760px){.v53-dual-actions{grid-template-columns:1fr}.v53-rule-list{grid-template-columns:1fr}.v53-payroll-actions{width:100%;justify-content:stretch}.v53-payroll-actions .btn{flex:1}.candidate{align-items:flex-start}.candidate .btn{width:auto}}

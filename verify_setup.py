@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Verify the RUMI v4 tables in Supabase without changing data."""
+"""Verify the RUMI v5.3 tables in Supabase without changing data."""
 from server import SB, TABLES, SUPABASE_KEY, SUPABASE_URL, validate_config, APIError
 
 
 def main():
     validate_config()
     print(f"Supabase: {SUPABASE_URL}")
-    print("Kiểm tra các bảng RUMI v4...")
+    print("Kiểm tra các bảng RUMI v5.3...")
     ok = 0
     for label, table in TABLES.items():
         try:
@@ -17,9 +17,9 @@ def main():
             print(f"  ✗ {table}: {exc}")
     print(f"\nKết quả: {ok}/{len(TABLES)} bảng truy cập được.")
     if ok != len(TABLES):
-        print("Hãy chạy lại sql/SUPABASE_RUMI_V4_FULL.sql trong Supabase SQL Editor.")
+        print("Hãy chạy SQL v4, sau đó chạy sql/SUPABASE_RUMI_V5_3_OPERATIONS.sql trong Supabase SQL Editor.")
         raise SystemExit(1)
-    print("Cấu hình cơ sở dữ liệu RUMI v4 đã sẵn sàng.")
+    print("Cấu hình cơ sở dữ liệu RUMI v5.3 đã sẵn sàng.")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
+  "fluid": true,
   "functions": {
     "api/index.py": {
       "maxDuration": 30
@@ -23,9 +24,21 @@
       ]
     },
     {
-      "source": "/(login|app|index.html|login.html|app.html|app.js|v5.js|styles.css|v5.css)",
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "private, no-store" }
+      ]
+    },
+    {
+      "source": "/(login|app|index.html|login.html|app.html)",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
+      ]
+    },
+    {
+      "source": "/(app.js|v5.js|styles.css|v5.css|icon.svg)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     }
   ]

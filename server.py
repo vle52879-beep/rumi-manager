@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RUMI Manager v4.4 Vercel — fixed admin account, employee CRUD, roles, scheduling and GPS.
+"""RUMI Manager v5.3 OPERATIONS — fixed admin account, employee CRUD, roles, scheduling and GPS.
 
 Python standard library only. The Supabase secret key stays in this backend and
 is never sent to the browser. Every database object used by this app starts
@@ -17,6 +17,7 @@ import re
 import secrets
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from http import cookies
@@ -34,6 +35,53 @@ SESSION_TTL = 12 * 60 * 60
 PASSWORD_ITERATIONS = 210_000
 LOGIN_ATTEMPTS: dict[str, list[float]] = defaultdict(list)
 
+
+class TTLCache:
+    """Tiny process-local cache for warm Vercel Function instances."""
+
+    def __init__(self):
+        self._data: dict[object, tuple[float, object]] = {}
+
+    def get(self, key):
+        item = self._data.get(key)
+        if not item:
+            return None
+        expires_at, value = item
+        if expires_at <= time.monotonic():
+            self._data.pop(key, None)
+            return None
+        return value
+
+    def set(self, key, value, ttl: float):
+        self._data[key] = (time.monotonic() + ttl, value)
+
+    def clear(self):
+        self._data.clear()
+
+
+USER_CACHE = TTLCache()
+PAYROLL_CACHE = TTLCache()
+
+
+def parallel_calls(**jobs):
+    """Run independent Supabase REST calls concurrently to hide network latency."""
+    if not jobs:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(12, len(jobs))) as pool:
+        futures = {name: pool.submit(fn) for name, fn in jobs.items()}
+        return {name: future.result() for name, future in futures.items()}
+
+
+def pg_in(values) -> str:
+    unique = []
+    seen = set()
+    for value in values:
+        ivalue = integer(value)
+        if ivalue and ivalue not in seen:
+            seen.add(ivalue)
+            unique.append(ivalue)
+    return "in.(" + ",".join(map(str, unique)) + ")"
+
 TABLES = {
     "employees": "rumi_employees",
     "users": "rumi_users",
@@ -49,6 +97,8 @@ TABLES = {
     "purchase_requests": "rumi_purchase_requests",
     "payroll_adjustments": "rumi_payroll_adjustments",
     "payroll_payments": "rumi_payroll_payments",
+    "payroll_runs": "rumi_payroll_runs",
+    "payroll_items": "rumi_payroll_items",
     "notifications": "rumi_notifications",
     "audit": "rumi_audit_logs",
 }
@@ -140,6 +190,57 @@ def calculate_hours(check_in: str, check_out: str | None) -> float:
     return round(seconds / 3600, 2)
 
 
+def minutes_delta(start: str, end: str) -> int:
+    """Minutes from start to end for same-day RUMI shifts."""
+    return time_minutes(end) - time_minutes(start)
+
+
+def attendance_metrics(shift: dict, check_in: str, check_out: str | None) -> dict:
+    scheduled_minutes = max(minutes_delta(shift["start_time"], shift["end_time"]), 0)
+    late_minutes = max(minutes_delta(shift["start_time"], check_in), 0) if check_in else 0
+    if not check_out:
+        return {
+            "scheduled_hours": round(scheduled_minutes / 60, 2),
+            "payable_hours": 0.0,
+            "late_minutes": late_minutes,
+            "early_leave_minutes": 0,
+            "overtime_minutes": 0,
+            "status": "Đang làm",
+            "calculation_note": f"Vào trễ {late_minutes} phút" if late_minutes else "Vào ca đúng giờ",
+        }
+    actual_minutes = max(minutes_delta(check_in, check_out), 0)
+    early_minutes = max(minutes_delta(check_out, shift["end_time"]), 0)
+    overtime_minutes = max(minutes_delta(shift["end_time"], check_out), 0)
+    if late_minutes and early_minutes:
+        status = "Đi trễ & về sớm"
+    elif late_minutes:
+        status = "Đi trễ"
+    elif early_minutes:
+        status = "Về sớm"
+    elif overtime_minutes:
+        status = "Có tăng ca"
+    else:
+        status = "Hoàn thành"
+    payable = round(actual_minutes / 60, 2)
+    parts = []
+    if late_minutes:
+        parts.append(f"Trễ {late_minutes} phút")
+    if early_minutes:
+        parts.append(f"Về sớm {early_minutes} phút")
+    if overtime_minutes:
+        parts.append(f"Tăng ca {overtime_minutes} phút")
+    parts.append(f"Giờ tính lương {payable}")
+    return {
+        "scheduled_hours": round(scheduled_minutes / 60, 2),
+        "payable_hours": payable,
+        "late_minutes": late_minutes,
+        "early_leave_minutes": early_minutes,
+        "overtime_minutes": overtime_minutes,
+        "status": status,
+        "calculation_note": " · ".join(parts),
+    }
+
+
 def normalize_time(value):
     if isinstance(value, str) and re.fullmatch(r"\d{2}:\d{2}:\d{2}(?:\.\d+)?", value):
         return value[:5]
@@ -187,7 +288,7 @@ class SupabaseREST:
         headers = {
             "apikey": self.service_key,
             "Accept": "application/json",
-            "User-Agent": "RUMI-Backend/4.4",
+            "User-Agent": "RUMI-Backend/5.3",
         }
         if self.service_key.startswith("eyJ"):
             headers["Authorization"] = f"Bearer {self.service_key}"
@@ -225,7 +326,9 @@ class SupabaseREST:
         text = str(message or "Lỗi cơ sở dữ liệu")
         lowered = text.lower()
         if code == "42P01" or "could not find the table" in lowered or ("relation" in lowered and "does not exist" in lowered):
-            return "Chưa nâng cấp cơ sở dữ liệu RUMI v4. Hãy chạy file sql/SUPABASE_RUMI_V4_FULL.sql."
+            if "payroll_runs" in lowered or "payroll_items" in lowered:
+                return "Chưa nâng cấp RUMI v5.3. Hãy chạy sql/SUPABASE_RUMI_V5_3_OPERATIONS.sql trong Supabase."
+            return "Chưa tạo đủ bảng RUMI. Hãy chạy SQL v4 trước, sau đó chạy migration v5.3."
         if "could not find the function" in lowered:
             return "Chưa tạo hàm nghiệp vụ RUMI v4. Hãy chạy lại file SQL v4 trong Supabase."
         if code == "23505":
@@ -253,9 +356,31 @@ class SupabaseREST:
         data = self.request("GET", table, params=params)
         return [normalize_row(x) for x in (data or [])]
 
+    def select_in(self, table: str, column: str, values, *, columns: str = "*", order: str = "") -> list[dict]:
+        ids = []
+        seen = set()
+        for value in values:
+            ivalue = integer(value)
+            if ivalue and ivalue not in seen:
+                seen.add(ivalue)
+                ids.append(ivalue)
+        if not ids:
+            return []
+        rows: list[dict] = []
+        for offset in range(0, len(ids), 150):
+            chunk = ids[offset:offset + 150]
+            rows.extend(self.select(table, filters={column: pg_in(chunk)}, columns=columns, order=order))
+        return rows
+
     def insert(self, table: str, body: dict) -> dict:
         data = self.request("POST", table, body=body, prefer="return=representation") or []
         return normalize_row(data[0]) if data else {}
+
+    def insert_many(self, table: str, rows: list[dict]) -> list[dict]:
+        if not rows:
+            return []
+        data = self.request("POST", table, body=rows, prefer="return=representation") or []
+        return [normalize_row(x) for x in data]
 
     def upsert(self, table: str, body: dict, on_conflict: str) -> dict:
         data = self.request("POST", table, params={"on_conflict": on_conflict}, body=body, prefer="resolution=merge-duplicates,return=representation") or []
@@ -366,7 +491,7 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/4.4"
+    server_version = "RUMI/5.3"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -426,7 +551,11 @@ class RumiHandler(BaseHTTPRequestHandler):
             if required:
                 raise APIError("Phiên đăng nhập đã hết hạn", 401)
             return None
-        users = SB.select(TABLES["users"], filters={"id": f"eq.{user_id}", "active": "eq.true"}, limit=1)
+        cached = USER_CACHE.get(user_id)
+        if cached:
+            return cached
+        users = SB.select(TABLES["users"], filters={"id": f"eq.{user_id}", "active": "eq.true"}, limit=1,
+                          columns="id,username,password_hash,password_salt,role,employee_id,active,last_login_at")
         if not users:
             if required:
                 raise APIError("Tài khoản không còn hoạt động", 401)
@@ -434,12 +563,14 @@ class RumiHandler(BaseHTTPRequestHandler):
         user = users[0]
         employee = None
         if user.get("employee_id"):
-            rows = SB.select(TABLES["employees"], filters={"id": f"eq.{user['employee_id']}"}, limit=1)
+            rows = SB.select(TABLES["employees"], filters={"id": f"eq.{user['employee_id']}"}, limit=1,
+                             columns="id,code,name,phone,email,role,hourly_wage,status,joined_at")
             employee = rows[0] if rows else None
             if user.get("role") == "employee" and (not employee or employee.get("status") != "Đang làm"):
                 raise APIError("Tài khoản nhân viên đã bị khóa", 403)
         user["profile"] = public_user(user, employee)
         user["employee"] = employee
+        USER_CACHE.set(user_id, user, 20)
         return user
 
     @staticmethod
@@ -470,6 +601,9 @@ class RumiHandler(BaseHTTPRequestHandler):
             if not parsed.path.startswith("/api/"):
                 raise APIError("Không tìm thấy đường dẫn", 404)
             self.handle_api_post(parsed.path, self.parse_json())
+            if parsed.path not in {"/api/auth/login", "/api/auth/logout"}:
+                USER_CACHE.clear()
+                PAYROLL_CACHE.clear()
         except APIError as exc:
             self.fail(str(exc), exc.status)
         except Exception as exc:
@@ -480,6 +614,8 @@ class RumiHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             self.handle_api_put(parsed.path, self.parse_json())
+            USER_CACHE.clear()
+            PAYROLL_CACHE.clear()
         except APIError as exc:
             self.fail(str(exc), exc.status)
         except Exception as exc:
@@ -489,6 +625,8 @@ class RumiHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         try:
             self.handle_api_delete(urlparse(self.path).path)
+            USER_CACHE.clear()
+            PAYROLL_CACHE.clear()
         except APIError as exc:
             self.fail(str(exc), exc.status)
         except Exception as exc:
@@ -571,10 +709,32 @@ class RumiHandler(BaseHTTPRequestHandler):
             "link": link,
         })
 
-    def enriched_shifts(self, shifts: list[dict]) -> list[dict]:
-        employees = SB.select(TABLES["employees"])
-        locations = SB.select(TABLES["locations"])
-        attendance = SB.select(TABLES["attendance"])
+    def enriched_shifts(self, shifts: list[dict], *, employees=None, locations=None, attendance=None) -> list[dict]:
+        if not shifts:
+            return []
+        employee_ids = [row.get("employee_id") for row in shifts]
+        location_ids = [row.get("location_id") for row in shifts]
+        shift_ids = [row.get("id") for row in shifts]
+        jobs = {}
+        if employees is None:
+            jobs["employees"] = lambda: SB.select_in(
+                TABLES["employees"], "id", employee_ids,
+                columns="id,code,name,role,status,hourly_wage"
+            )
+        if locations is None:
+            jobs["locations"] = lambda: SB.select_in(
+                TABLES["locations"], "id", location_ids,
+                columns="id,name,address,latitude,longitude,radius_m,active"
+            )
+        if attendance is None:
+            jobs["attendance"] = lambda: SB.select_in(
+                TABLES["attendance"], "shift_id", shift_ids,
+                columns="id,shift_id,employee_id,work_date,check_in,check_out,hours,payable_hours,scheduled_hours,late_minutes,early_leave_minutes,overtime_minutes,status,calculation_note,check_in_at,check_out_at,check_in_distance_m,check_out_distance_m,check_in_accuracy_m,check_out_accuracy_m"
+            )
+        fetched = parallel_calls(**jobs)
+        employees = employees if employees is not None else fetched.get("employees", [])
+        locations = locations if locations is not None else fetched.get("locations", [])
+        attendance = attendance if attendance is not None else fetched.get("attendance", [])
         e_map, l_map = employee_map(employees), location_map(locations)
         a_map = {integer(row.get("shift_id")): row for row in attendance if row.get("shift_id")}
         output = []
@@ -595,146 +755,385 @@ class RumiHandler(BaseHTTPRequestHandler):
             output.append(item)
         return output
 
-    def candidate_rows(self, work_date: str, start: str, end: str, exclude_employee_id: int = 0, ignore_shift_id: int = 0) -> list[dict]:
-        employees = SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, order="name.asc")
-        shifts = SB.select(TABLES["shifts"], filters={"shift_date": f"eq.{work_date}"})
-        leaves = SB.select(TABLES["leaves"], filters={"status": "eq.Đã duyệt"})
-        availability = SB.select(TABLES["availability"], filters={"work_date": f"eq.{work_date}"})
+    def candidate_rows(self, work_date: str, start: str, end: str, exclude_employee_id: int = 0,
+                       ignore_shift_id: int = 0, required_role: str = "") -> list[dict]:
+        target = datetime.strptime(work_date, "%Y-%m-%d").date()
+        week_start = target - timedelta(days=target.weekday())
+        week_end = week_start + timedelta(days=6)
+        data = parallel_calls(
+            employees=lambda: SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, order="name.asc"),
+            shifts=lambda: SB.select(TABLES["shifts"], filters={"shift_date": f"gte.{week_start.isoformat()}", "and": f"(shift_date.lte.{week_end.isoformat()})"}),
+            leaves=lambda: SB.select(TABLES["leaves"], filters={"status": "eq.Đã duyệt", "start_date": f"lte.{work_date}", "and": f"(end_date.gte.{work_date})"}),
+            availability=lambda: SB.select(TABLES["availability"], filters={"work_date": f"eq.{work_date}"}),
+        )
+        employees, shifts, leaves, availability = data["employees"], data["shifts"], data["leaves"], data["availability"]
+        role_need = str(required_role or "").strip().lower()
         output = []
         for employee in employees:
             eid = integer(employee.get("id"))
             if eid == exclude_employee_id:
                 continue
+            day_shifts = [x for x in shifts if x.get("shift_date") == work_date]
+            own_week = [x for x in shifts if integer(x.get("employee_id")) == eid and x.get("status") in {"Đã xếp", "Đã xác nhận"} and integer(x.get("id")) != ignore_shift_id]
             approved = [a for a in availability if integer(a.get("employee_id")) == eid and a.get("status") in {"Đã duyệt", "Đã xếp ca"} and time_minutes(a["start_time"]) <= time_minutes(start) and time_minutes(a["end_time"]) >= time_minutes(end)]
-            busy = [s for s in shifts if integer(s.get("employee_id")) == eid and integer(s.get("id")) != ignore_shift_id and s.get("status") in {"Đã xếp", "Đã xác nhận"} and overlaps(s["start_time"], s["end_time"], start, end)]
-            on_leave = any(integer(l.get("employee_id")) == eid and l.get("start_date") <= work_date <= l.get("end_date") for l in leaves)
+            busy = [x for x in day_shifts if integer(x.get("employee_id")) == eid and integer(x.get("id")) != ignore_shift_id and x.get("status") in {"Đã xếp", "Đã xác nhận"} and overlaps(x["start_time"], x["end_time"], start, end)]
+            on_leave = any(integer(x.get("employee_id")) == eid for x in leaves)
+            role_match = not role_need or role_need in {"bất kỳ", "bat ky", "all"} or role_need == str(employee.get("role") or "").strip().lower()
+            week_hours = round(sum(max(minutes_delta(x["start_time"], x["end_time"]), 0) for x in own_week) / 60, 2)
+            week_shifts = len(own_week)
             if on_leave:
                 state, reason = "on_leave", "Đang nghỉ phép"
             elif busy:
                 state, reason = "busy", f"Trùng ca {busy[0]['start_time']}–{busy[0]['end_time']}"
+            elif not role_match:
+                state, reason = "role_mismatch", f"Không đúng vị trí cần: {required_role}"
             elif not approved:
-                state, reason = "unregistered", "Chưa đăng ký rảnh"
+                state, reason = "unregistered", "Chưa có lịch rảnh được duyệt"
             else:
-                state, reason = "available", "Rảnh và đã được duyệt"
+                state, reason = "available", "Phù hợp và sẵn sàng"
+            score = max(0, round(100 - week_hours * 2 - week_shifts * 3 + (10 if role_match else 0)))
             output.append({
-                "employee_id": eid,
-                "code": employee.get("code"),
-                "name": employee.get("name"),
-                "role": employee.get("role"),
-                "state": state,
-                "reason": reason,
+                "employee_id": eid, "code": employee.get("code"), "name": employee.get("name"),
+                "role": employee.get("role"), "state": state, "reason": reason,
                 "availability_id": approved[0].get("id") if approved else None,
+                "week_hours": week_hours, "week_shifts": week_shifts, "score": score,
+                "role_match": role_match,
             })
-        output.sort(key=lambda x: ({"available": 0, "unregistered": 1, "busy": 2, "on_leave": 3}.get(x["state"], 9), x["name"] or ""))
+        priority = {"available": 0, "unregistered": 1, "role_mismatch": 2, "busy": 3, "on_leave": 4}
+        output.sort(key=lambda x: (priority.get(x["state"], 9), -integer(x.get("score")), num(x.get("week_hours")), x["name"] or ""))
         return output
 
-    def build_payroll(self, month: str, employee_id: int | None = None) -> list[dict]:
-        start, end = month_bounds(month)
-        filters = {"status": "eq.Đang làm"}
-        if employee_id:
-            filters["id"] = f"eq.{employee_id}"
-        employees = SB.select(TABLES["employees"], filters=filters, order="name.asc")
-        attendance = SB.select(TABLES["attendance"], filters={"work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"})
-        adjustments = SB.select(TABLES["payroll_adjustments"], filters={"month": f"eq.{month}"})
-        payments = SB.select(TABLES["payroll_payments"], filters={"month": f"eq.{month}"})
-        hours_by_employee: dict[int, float] = defaultdict(float)
+    def payroll_from_rows(self, employees, attendance, adjustments, payments) -> list[dict]:
+        totals: dict[int, dict] = defaultdict(lambda: {
+            "actual_hours": 0.0, "payable_hours": 0.0, "scheduled_hours": 0.0,
+            "late_minutes": 0, "early_leave_minutes": 0, "overtime_minutes": 0,
+            "attendance_count": 0,
+        })
         for row in attendance:
-            hours_by_employee[integer(row["employee_id"])] += num(row.get("hours"))
-        adj_map = {integer(x["employee_id"]): x for x in adjustments}
-        pay_map = {integer(x["employee_id"]): x for x in payments}
+            eid = integer(row.get("employee_id"))
+            bucket = totals[eid]
+            actual = num(row.get("hours"))
+            payable = num(row.get("payable_hours"), actual) or actual
+            bucket["actual_hours"] += actual
+            bucket["payable_hours"] += payable
+            bucket["scheduled_hours"] += num(row.get("scheduled_hours"))
+            bucket["late_minutes"] += integer(row.get("late_minutes"))
+            bucket["early_leave_minutes"] += integer(row.get("early_leave_minutes"))
+            bucket["overtime_minutes"] += integer(row.get("overtime_minutes"))
+            if row.get("check_out") or row.get("status") != "Đang làm":
+                bucket["attendance_count"] += 1
+        adj_map = {integer(x.get("employee_id")): x for x in adjustments}
+        pay_map = {integer(x.get("employee_id")): x for x in payments}
         output = []
         for employee in employees:
-            eid = integer(employee["id"])
-            hours = round(hours_by_employee.get(eid, 0), 2)
+            eid = integer(employee.get("id"))
+            t = totals[eid]
             adjustment = adj_map.get(eid, {})
             payment = pay_map.get(eid, {})
+            payable_hours = round(t["payable_hours"], 2)
+            actual_hours = round(t["actual_hours"], 2)
+            scheduled_hours = round(t["scheduled_hours"], 2)
             bonus = num(adjustment.get("bonus"))
             penalty = num(adjustment.get("penalty"))
             advance = num(adjustment.get("advance_pay"))
-            total = round(hours * num(employee.get("hourly_wage")) + bonus - penalty - advance)
+            base_salary = round(payable_hours * num(employee.get("hourly_wage")))
+            total = round(base_salary + bonus - penalty - advance)
             output.append({
-                "employee_id": eid,
-                "code": employee.get("code"),
-                "name": employee.get("name"),
-                "role": employee.get("role"),
-                "hourly_wage": num(employee.get("hourly_wage")),
-                "hours": hours,
-                "bonus": bonus,
-                "penalty": penalty,
-                "advance_pay": advance,
+                "employee_id": eid, "code": employee.get("code"), "name": employee.get("name"),
+                "role": employee.get("role"), "hourly_wage": num(employee.get("hourly_wage")),
+                "hours": payable_hours, "actual_hours": actual_hours, "payable_hours": payable_hours,
+                "scheduled_hours": scheduled_hours, "late_minutes": t["late_minutes"],
+                "early_leave_minutes": t["early_leave_minutes"], "overtime_minutes": t["overtime_minutes"],
+                "attendance_count": t["attendance_count"], "base_salary": base_salary,
+                "bonus": bonus, "penalty": penalty, "advance_pay": advance,
                 "note": adjustment.get("note", ""),
                 "payment_status": payment.get("status", "Chưa thanh toán"),
-                "paid_at": payment.get("paid_at"),
-                "total": total,
+                "paid_at": payment.get("paid_at"), "total": total,
             })
         return output
+
+    def build_payroll(self, month: str, employee_id: int | None = None) -> list[dict]:
+        cache_key = ("live", month, employee_id or 0)
+        cached = PAYROLL_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        start, end = month_bounds(month)
+        employee_filters = {}
+        attendance_filters = {"work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"}
+        adjustment_filters = {"month": f"eq.{month}"}
+        payment_filters = {"month": f"eq.{month}"}
+        if employee_id:
+            employee_filters["id"] = f"eq.{employee_id}"
+            attendance_filters["employee_id"] = f"eq.{employee_id}"
+            adjustment_filters["employee_id"] = f"eq.{employee_id}"
+            payment_filters["employee_id"] = f"eq.{employee_id}"
+        data = parallel_calls(
+            employees=lambda: SB.select(TABLES["employees"], filters=employee_filters, order="name.asc", columns="id,code,name,role,hourly_wage,status"),
+            attendance=lambda: SB.select(TABLES["attendance"], filters=attendance_filters, columns="employee_id,hours,payable_hours,scheduled_hours,late_minutes,early_leave_minutes,overtime_minutes,work_date,check_out,status"),
+            adjustments=lambda: SB.select(TABLES["payroll_adjustments"], filters=adjustment_filters, columns="employee_id,bonus,penalty,advance_pay,note,month"),
+            payments=lambda: SB.select(TABLES["payroll_payments"], filters=payment_filters, columns="employee_id,status,paid_at,month"),
+        )
+        relevant_ids = {integer(x.get("employee_id")) for group in (data["attendance"], data["adjustments"], data["payments"]) for x in group}
+        employees = [x for x in data["employees"] if x.get("status") == "Đang làm" or integer(x.get("id")) in relevant_ids]
+        rows = self.payroll_from_rows(employees, data["attendance"], data["adjustments"], data["payments"])
+        PAYROLL_CACHE.set(cache_key, rows, 20)
+        return rows
+
+    def payroll_run(self, month: str) -> dict | None:
+        rows = SB.select(TABLES["payroll_runs"], filters={"month": f"eq.{month}"}, limit=1)
+        return rows[0] if rows else None
+
+    def payroll_page(self, user: dict, month: str) -> dict:
+        employee_id = integer(user.get("employee_id")) if user.get("role") == "employee" else None
+        run = self.payroll_run(month)
+        if run and run.get("status") == "Đã chốt":
+            filters = {"run_id": f"eq.{run['id']}"}
+            if employee_id:
+                filters["employee_id"] = f"eq.{employee_id}"
+            locked_data = parallel_calls(
+                items=lambda: SB.select(TABLES["payroll_items"], filters=filters, order="employee_name.asc"),
+                payments=lambda: SB.select(TABLES["payroll_payments"], filters={"month": f"eq.{month}"} | ({"employee_id": f"eq.{employee_id}"} if employee_id else {})),
+            )
+            items, payments = locked_data["items"], locked_data["payments"]
+            pmap = {integer(x.get("employee_id")): x for x in payments}
+            rows = []
+            for item in items:
+                payment = pmap.get(integer(item.get("employee_id")), {})
+                row = dict(item)
+                row["code"] = row.pop("employee_code", "")
+                row["name"] = row.pop("employee_name", "")
+                row["role"] = row.pop("employee_role", "")
+                row["hours"] = num(row.get("payable_hours"))
+                row["payment_status"] = payment.get("status", "Chưa thanh toán")
+                row["paid_at"] = payment.get("paid_at")
+                rows.append(row)
+        else:
+            rows = self.build_payroll(month, employee_id)
+        meta = run or {"month": month, "status": "Chưa tạo", "generated_at": None, "locked_at": None}
+        return {"month": month, "run": meta, "items": rows}
+
+    def save_payroll_draft(self, user: dict, month: str, note: str = "") -> dict:
+        existing = self.payroll_run(month)
+        if existing and existing.get("status") == "Đã chốt":
+            raise APIError("Bảng lương tháng này đã chốt. Hãy mở khóa trước khi tính lại.", 409)
+        rows = self.build_payroll(month)
+        run = SB.upsert(TABLES["payroll_runs"], {
+            "month": month, "status": "Nháp", "generated_at": now_iso(), "locked_at": None,
+            "generated_by": user.get("id"), "note": note,
+            "total_hours": round(sum(num(x.get("payable_hours")) for x in rows), 2),
+            "total_amount": round(sum(num(x.get("total")) for x in rows)),
+            "employee_count": len(rows),
+        }, "month")
+        SB.delete(TABLES["payroll_items"], {"run_id": f"eq.{run['id']}"})
+        payload = [{
+            "run_id": run["id"], "employee_id": x["employee_id"], "employee_code": x.get("code", ""),
+            "employee_name": x.get("name", ""), "employee_role": x.get("role", ""),
+            "attendance_count": x.get("attendance_count", 0),
+            "hourly_wage": x.get("hourly_wage", 0), "scheduled_hours": x.get("scheduled_hours", 0),
+            "actual_hours": x.get("actual_hours", 0), "payable_hours": x.get("payable_hours", 0),
+            "late_minutes": x.get("late_minutes", 0), "early_leave_minutes": x.get("early_leave_minutes", 0),
+            "overtime_minutes": x.get("overtime_minutes", 0), "base_salary": x.get("base_salary", 0),
+            "bonus": x.get("bonus", 0), "penalty": x.get("penalty", 0), "advance_pay": x.get("advance_pay", 0),
+            "total": x.get("total", 0), "note": x.get("note", ""),
+        } for x in rows]
+        SB.insert_many(TABLES["payroll_items"], payload)
+        PAYROLL_CACHE.clear()
+        return self.payroll_page(user, month)
 
     def build_dashboard(self, user: dict) -> dict:
         role = user.get("role")
         today = today_text()
         month = current_month()
-        notifications = self.get_notifications(user)
+        month_start, month_end = month_bounds(month)
         if role == "admin":
-            employees = SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"})
-            shifts_today = self.enriched_shifts(SB.select(TABLES["shifts"], filters={"shift_date": f"eq.{today}"}, order="start_time.asc"))
-            attendance_today = SB.select(TABLES["attendance"], filters={"work_date": f"eq.{today}"})
-            availability = SB.select(TABLES["availability"], filters={"status": "eq.Chờ duyệt"})
-            leaves = SB.select(TABLES["leaves"], filters={"status": "eq.Chờ duyệt"})
-            changes = SB.select(TABLES["shift_changes"], filters={"status": "eq.Chờ xử lý"})
-            inventory = SB.select(TABLES["inventory"])
-            purchases = SB.select(TABLES["purchase_requests"], filters={"status": "eq.Chờ mua"})
-            payroll = self.build_payroll(month)
+            data = parallel_calls(
+                employees=lambda: SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"},
+                                            columns="id,code,name,role,hourly_wage,status"),
+                shifts=lambda: SB.select(TABLES["shifts"], filters={"shift_date": f"eq.{today}"}, order="start_time.asc",
+                                         columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"),
+                locations=lambda: SB.select(TABLES["locations"], columns="id,name,address,radius_m,active"),
+                attendance=lambda: SB.select(TABLES["attendance"],
+                                             filters={"work_date": f"gte.{month_start}", "and": f"(work_date.lt.{month_end})"},
+                                             columns="id,shift_id,employee_id,work_date,hours,status,check_in,check_out,check_in_distance_m,check_in_accuracy_m"),
+                availability=lambda: SB.select(TABLES["availability"], filters={"status": "eq.Chờ duyệt"}, columns="id"),
+                leaves=lambda: SB.select(TABLES["leaves"], filters={"status": "eq.Chờ duyệt"}, columns="id"),
+                changes=lambda: SB.select(TABLES["shift_changes"], filters={"status": "eq.Chờ xử lý"}, columns="id"),
+                inventory=lambda: SB.select(TABLES["inventory"], columns="id,quantity,min_stock"),
+                purchases=lambda: SB.select(TABLES["purchase_requests"], filters={"status": "eq.Chờ mua"}, columns="id"),
+                adjustments=lambda: SB.select(TABLES["payroll_adjustments"], filters={"month": f"eq.{month}"},
+                                              columns="employee_id,bonus,penalty,advance_pay,note,month"),
+                payments=lambda: SB.select(TABLES["payroll_payments"], filters={"month": f"eq.{month}"},
+                                           columns="employee_id,status,paid_at,month"),
+                notifications=lambda: self.get_notifications(user, limit=20),
+            )
+            attendance_today = [x for x in data["attendance"] if x.get("work_date") == today]
+            shifts_today = self.enriched_shifts(
+                data["shifts"], employees=data["employees"], locations=data["locations"], attendance=attendance_today
+            )
+            payroll = self.payroll_from_rows(data["employees"], data["attendance"], data["adjustments"], data["payments"])
+            notifications = data["notifications"]
             return {
                 "role": role,
                 "stats": {
-                    "employees": len(employees),
+                    "employees": len(data["employees"]),
                     "shifts_today": len(shifts_today),
                     "working_now": len([x for x in attendance_today if x.get("status") == "Đang làm"]),
-                    "pending_schedule": len(availability),
-                    "pending_requests": len(leaves) + len(changes),
-                    "low_stock": len([x for x in inventory if num(x.get("quantity")) <= num(x.get("min_stock"))]),
-                    "pending_purchase": len(purchases),
+                    "pending_schedule": len(data["availability"]),
+                    "pending_requests": len(data["leaves"]) + len(data["changes"]),
+                    "low_stock": len([x for x in data["inventory"] if num(x.get("quantity")) <= num(x.get("min_stock"))]),
+                    "pending_purchase": len(data["purchases"]),
                     "payroll_total": sum(num(x.get("total")) for x in payroll),
                 },
                 "today_shifts": shifts_today,
                 "notifications": notifications[:6],
+                "unread_count": len([x for x in notifications if not x.get("read_at")]),
             }
         employee_id = integer(user.get("employee_id"))
-        shifts = SB.select(TABLES["shifts"], filters={"employee_id": f"eq.{employee_id}", "shift_date": f"gte.{today}"}, order="shift_date.asc,start_time.asc", limit=20)
-        shifts = self.enriched_shifts(shifts)
-        attendance = SB.select(TABLES["attendance"], filters={"employee_id": f"eq.{employee_id}"})
-        month_hours = sum(num(x.get("hours")) for x in attendance if str(x.get("work_date", "")).startswith(month))
-        pending_availability = SB.select(TABLES["availability"], filters={"employee_id": f"eq.{employee_id}", "status": "eq.Chờ duyệt"})
-        pending_changes = SB.select(TABLES["shift_changes"], filters={"requester_id": f"eq.{employee_id}", "status": "eq.Chờ xử lý"})
-        payroll = self.build_payroll(month, employee_id)
+        employee = user.get("employee") or {}
+        data = parallel_calls(
+            shifts=lambda: SB.select(TABLES["shifts"],
+                                     filters={"employee_id": f"eq.{employee_id}", "shift_date": f"gte.{today}"},
+                                     order="shift_date.asc,start_time.asc", limit=20,
+                                     columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"),
+            locations=lambda: SB.select(TABLES["locations"], filters={"active": "eq.true"},
+                                        columns="id,name,address,radius_m,active"),
+            attendance=lambda: SB.select(TABLES["attendance"],
+                                         filters={"employee_id": f"eq.{employee_id}", "work_date": f"gte.{month_start}", "and": f"(work_date.lt.{month_end})"},
+                                         columns="id,shift_id,employee_id,work_date,hours,status,check_in,check_out,check_in_distance_m,check_in_accuracy_m"),
+            availability=lambda: SB.select(TABLES["availability"], filters={"employee_id": f"eq.{employee_id}", "status": "eq.Chờ duyệt"}, columns="id"),
+            leaves=lambda: SB.select(TABLES["leaves"], filters={"employee_id": f"eq.{employee_id}", "status": "eq.Chờ duyệt"}, columns="id"),
+            changes=lambda: SB.select(TABLES["shift_changes"], filters={"requester_id": f"eq.{employee_id}", "status": "eq.Chờ xử lý"}, columns="id"),
+            adjustments=lambda: SB.select(TABLES["payroll_adjustments"], filters={"employee_id": f"eq.{employee_id}", "month": f"eq.{month}"},
+                                          columns="employee_id,bonus,penalty,advance_pay,note,month"),
+            payments=lambda: SB.select(TABLES["payroll_payments"], filters={"employee_id": f"eq.{employee_id}", "month": f"eq.{month}"},
+                                       columns="employee_id,status,paid_at,month"),
+            notifications=lambda: self.get_notifications(user, limit=20),
+        )
+        shifts = self.enriched_shifts(data["shifts"], employees=[employee], locations=data["locations"], attendance=data["attendance"])
+        payroll = self.payroll_from_rows([employee], data["attendance"], data["adjustments"], data["payments"])
+        notifications = data["notifications"]
         return {
             "role": role,
             "stats": {
                 "upcoming_shifts": len(shifts),
-                "month_hours": round(month_hours, 2),
-                "pending_requests": len(pending_availability) + len(pending_changes),
+                "month_hours": round(sum(num(x.get("hours")) for x in data["attendance"]), 2),
+                "pending_requests": len(data["availability"]) + len(data["leaves"]) + len(data["changes"]),
                 "unread_notifications": len([x for x in notifications if not x.get("read_at")]),
                 "estimated_salary": payroll[0]["total"] if payroll else 0,
             },
             "today_shifts": [x for x in shifts if x.get("shift_date") == today],
             "upcoming_shifts": shifts[:6],
             "notifications": notifications[:6],
+            "unread_count": len([x for x in notifications if not x.get("read_at")]),
         }
 
-    def get_notifications(self, user: dict) -> list[dict]:
-        rows = SB.select(TABLES["notifications"], order="created_at.desc", limit=300)
+    def get_notifications(self, user: dict, *, limit: int = 100, unread_only: bool = False) -> list[dict]:
         eid = integer(user.get("employee_id"))
-        role = user.get("role")
-        filtered = [x for x in rows if (eid and integer(x.get("employee_id")) == eid) or x.get("audience_role") == role]
-        return filtered[:100]
+        role = str(user.get("role") or "")
+        filters = {"audience_role": f"eq.{role}"} if not eid else {"or": f"(employee_id.eq.{eid},audience_role.eq.{role})"}
+        if unread_only:
+            filters["read_at"] = "is.null"
+        return SB.select(
+            TABLES["notifications"], filters=filters, order="created_at.desc", limit=limit,
+            columns="id,employee_id,audience_role,title,message,type,link,read_at,created_at"
+        )
+
+    def build_requests_page(self, user: dict) -> dict:
+        employee_mode = user.get("role") == "employee"
+        availability_filters = {"employee_id": f"eq.{user['employee_id']}"} if employee_mode else {}
+        leave_filters = {"employee_id": f"eq.{user['employee_id']}"} if employee_mode else {}
+        change_filters = {"requester_id": f"eq.{user['employee_id']}"} if employee_mode else {}
+        data = parallel_calls(
+            availability=lambda: SB.select(TABLES["availability"], filters=availability_filters, order="work_date.desc,start_time.asc"),
+            leaves=lambda: SB.select(TABLES["leaves"], filters=leave_filters, order="created_at.desc"),
+            changes=lambda: SB.select(TABLES["shift_changes"], filters=change_filters, order="created_at.desc"),
+            employees=lambda: SB.select(TABLES["employees"], columns="id,code,name,role,status"),
+            upcoming=lambda: SB.select(
+                TABLES["shifts"],
+                filters={"employee_id": f"eq.{user['employee_id']}", "shift_date": f"gte.{today_text()}"},
+                order="shift_date.asc,start_time.asc", limit=40,
+                columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"
+            ) if employee_mode else [],
+        )
+        shifts = SB.select_in(
+            TABLES["shifts"], "id", [x.get("shift_id") for x in data["changes"]],
+            columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"
+        )
+        shift_map = {integer(x.get("id")): x for x in shifts}
+        e_map = employee_map(data["employees"])
+        changes = []
+        for row in data["changes"]:
+            item = dict(row)
+            requester = e_map.get(integer(item.get("requester_id")), {})
+            replacement = e_map.get(integer(item.get("replacement_employee_id")), {})
+            item["employee_name"] = requester.get("name")
+            item["replacement_name"] = replacement.get("name")
+            item["shift"] = shift_map.get(integer(item.get("shift_id")))
+            changes.append(item)
+        upcoming = self.enriched_shifts(data["upcoming"]) if employee_mode else []
+        return {
+            "availability": add_people(data["availability"], data["employees"]),
+            "leaves": add_people(data["leaves"], data["employees"]),
+            "changes": changes,
+            "upcoming_shifts": upcoming,
+        }
+
+    def build_attendance_rows(self, user: dict, month: str) -> list[dict]:
+        start, end = month_bounds(month)
+        filters = {"work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"}
+        if user.get("role") == "employee":
+            filters["employee_id"] = f"eq.{user['employee_id']}"
+        rows = SB.select(TABLES["attendance"], filters=filters, order="work_date.desc,check_in.desc")
+        employee_ids = [x.get("employee_id") for x in rows]
+        shift_ids = [x.get("shift_id") for x in rows]
+        data = parallel_calls(
+            employees=lambda: SB.select_in(TABLES["employees"], "id", employee_ids, columns="id,code,name,role"),
+            shifts=lambda: SB.select_in(
+                TABLES["shifts"], "id", shift_ids,
+                columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"
+            ),
+        )
+        enriched = self.enriched_shifts(data["shifts"], employees=data["employees"], attendance=rows)
+        shift_map = {integer(x.get("id")): x for x in enriched}
+        output = add_people(rows, data["employees"])
+        for item in output:
+            item["shift"] = shift_map.get(integer(item.get("shift_id")))
+            shift = item.get("shift")
+            if shift and item.get("check_in"):
+                derived = attendance_metrics(shift, item.get("check_in"), item.get("check_out"))
+                for key, value in derived.items():
+                    if key not in item or item.get(key) in (None, "", 0, 0.0):
+                        item[key] = value
+        return output
+
+    def build_inventory_page(self, user: dict) -> dict:
+        employee_filters = {} if user.get("role") == "admin" else {"employee_id": f"eq.{user['employee_id']}"}
+        data = parallel_calls(
+            items=lambda: SB.select(TABLES["inventory"], order="category.asc,name.asc"),
+            withdrawals=lambda: SB.select(TABLES["withdrawals"], filters=employee_filters, order="taken_at.desc,id.desc", limit=300),
+            employees=lambda: SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, order="name.asc", columns="id,code,name,role"),
+        )
+        data["items"].sort(key=lambda x: (0 if num(x.get("quantity")) <= num(x.get("min_stock")) else 1, str(x.get("category")), str(x.get("name"))))
+        inventory = {integer(x.get("id")): x for x in data["items"]}
+        employees = employee_map(data["employees"])
+        for item in data["withdrawals"]:
+            inv = inventory.get(integer(item.get("inventory_id")), {})
+            emp = employees.get(integer(item.get("employee_id")), {})
+            item["item_name"] = inv.get("name", "Nguyên liệu")
+            item["unit"] = inv.get("unit", "")
+            item["employee_name"] = emp.get("name")
+        return {"items": data["items"], "withdrawals": data["withdrawals"], "employees": data["employees"]}
 
     # ------------------------------------------------------------------
     # GET routes
     # ------------------------------------------------------------------
     def handle_api_get(self, path: str, query: dict):
         if path == "/api/health":
-            SB.select(TABLES["employees"], limit=1, columns="id")
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "5.0", "time": now_iso()})
+            parallel_calls(
+                employees=lambda: SB.select(TABLES["employees"], limit=1, columns="id"),
+                payroll_runs=lambda: SB.select(TABLES["payroll_runs"], limit=1, columns="id"),
+            )
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "5.3", "operations_ready": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -744,11 +1143,78 @@ class RumiHandler(BaseHTTPRequestHandler):
         if path == "/api/auth/me":
             return self.ok(user["profile"])
 
+        if path == "/api/bootstrap":
+            dashboard = self.build_dashboard(user)
+            return self.ok({"user": user["profile"], "dashboard": dashboard, "unread_count": dashboard.get("unread_count", 0)})
+
         if path == "/api/dashboard":
             return self.ok(self.build_dashboard(user))
 
         if path == "/api/notifications":
             return self.ok(self.get_notifications(user))
+
+        if path == "/api/notifications/unread-count":
+            return self.ok({"count": len(self.get_notifications(user, limit=500, unread_only=True))})
+
+        if path == "/api/page/schedule":
+            self.require_role(user, "admin")
+            start = query.get("start", [today_text()])[0]
+            end = query.get("end", [start])[0]
+            filters = {"shift_date": f"gte.{start}", "and": f"(shift_date.lte.{end})"}
+            data = parallel_calls(
+                shifts=lambda: SB.select(TABLES["shifts"], filters=filters, order="shift_date.asc,start_time.asc",
+                                         columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"),
+                locations=lambda: SB.select(TABLES["locations"], order="active.desc,name.asc"),
+                employees=lambda: SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, columns="id,role"),
+            )
+            roles = sorted({str(x.get("role") or "").strip() for x in data["employees"] if str(x.get("role") or "").strip()})
+            return self.ok({"shifts": self.enriched_shifts(data["shifts"], locations=data["locations"]), "locations": data["locations"], "roles": roles})
+
+        if path == "/api/page/requests":
+            return self.ok(self.build_requests_page(user))
+
+        if path == "/api/page/attendance":
+            month = query.get("month", [current_month()])[0]
+            if user.get("role") == "admin":
+                return self.ok({"history": self.build_attendance_rows(user, month)})
+            start, end = month_bounds(month)
+            data = parallel_calls(
+                today_shifts=lambda: SB.select(TABLES["shifts"],
+                                               filters={"employee_id": f"eq.{user['employee_id']}", "shift_date": f"eq.{today_text()}"},
+                                               order="start_time.asc",
+                                               columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"),
+                attendance=lambda: SB.select(TABLES["attendance"],
+                                             filters={"employee_id": f"eq.{user['employee_id']}", "work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"},
+                                             order="work_date.desc,check_in.desc"),
+                settings=lambda: SB.select(TABLES["settings"], filters={"id": "eq.1"}, limit=1),
+                locations=lambda: SB.select(TABLES["locations"], filters={"active": "eq.true"}),
+            )
+            shift_ids = [x.get("shift_id") for x in data["attendance"]]
+            history_shifts = SB.select_in(TABLES["shifts"], "id", shift_ids,
+                                          columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note")
+            all_shifts = {integer(x.get("id")): x for x in history_shifts + data["today_shifts"]}
+            enriched = self.enriched_shifts(list(all_shifts.values()), employees=[user.get("employee") or {}],
+                                            locations=data["locations"], attendance=data["attendance"])
+            shift_map = {integer(x.get("id")): x for x in enriched}
+            history = add_people(data["attendance"], [user.get("employee") or {}])
+            for item in history:
+                item["shift"] = shift_map.get(integer(item.get("shift_id")))
+            return self.ok({
+                "today_shifts": [shift_map.get(integer(x.get("id")), x) for x in data["today_shifts"]],
+                "history": history,
+                "settings": data["settings"][0] if data["settings"] else {},
+            })
+
+        if path == "/api/page/inventory":
+            return self.ok(self.build_inventory_page(user))
+
+        if path == "/api/page/locations":
+            self.require_role(user, "admin")
+            data = parallel_calls(
+                locations=lambda: SB.select(TABLES["locations"], order="active.desc,name.asc"),
+                settings=lambda: SB.select(TABLES["settings"], filters={"id": "eq.1"}, limit=1),
+            )
+            return self.ok({"locations": data["locations"], "settings": data["settings"][0] if data["settings"] else {}})
 
         if path == "/api/employees/public":
             rows = SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, order="name.asc", columns="id,code,name,role")
@@ -784,14 +1250,16 @@ class RumiHandler(BaseHTTPRequestHandler):
             if end:
                 filters["and"] = f"(work_date.lte.{end})"
             rows = SB.select(TABLES["availability"], filters=filters, order="work_date.desc,start_time.asc")
-            return self.ok(add_people(rows, SB.select(TABLES["employees"])))
+            employees = SB.select_in(TABLES["employees"], "id", [x.get("employee_id") for x in rows], columns="id,code,name,role")
+            return self.ok(add_people(rows, employees))
 
         if path == "/api/leaves":
             filters = {}
             if user.get("role") == "employee":
                 filters["employee_id"] = f"eq.{user['employee_id']}"
             rows = SB.select(TABLES["leaves"], filters=filters, order="created_at.desc")
-            return self.ok(add_people(rows, SB.select(TABLES["employees"])))
+            employees = SB.select_in(TABLES["employees"], "id", [x.get("employee_id") for x in rows], columns="id,code,name,role")
+            return self.ok(add_people(rows, employees))
 
         if path == "/api/shift-change-requests":
             filters = {}
@@ -834,7 +1302,8 @@ class RumiHandler(BaseHTTPRequestHandler):
                 raise APIError("Giờ kết thúc phải sau giờ bắt đầu")
             exclude = integer(query.get("exclude_employee_id", ["0"])[0])
             ignore_shift = integer(query.get("ignore_shift_id", ["0"])[0])
-            return self.ok(self.candidate_rows(work_date, start, end, exclude, ignore_shift))
+            required_role = query.get("role", [""])[0]
+            return self.ok(self.candidate_rows(work_date, start, end, exclude, ignore_shift, required_role))
 
         if path == "/api/attendance/today":
             self.require_role(user, "employee")
@@ -843,22 +1312,15 @@ class RumiHandler(BaseHTTPRequestHandler):
 
         if path == "/api/attendance":
             month = query.get("month", [current_month()])[0]
-            start, end = month_bounds(month)
-            filters = {"work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"}
-            if user.get("role") == "employee":
-                filters["employee_id"] = f"eq.{user['employee_id']}"
-            rows = SB.select(TABLES["attendance"], filters=filters, order="work_date.desc,check_in.desc")
-            employees = SB.select(TABLES["employees"])
-            shifts = {integer(x["id"]): x for x in self.enriched_shifts(SB.select(TABLES["shifts"]))}
-            output = add_people(rows, employees)
-            for item in output:
-                item["shift"] = shifts.get(integer(item.get("shift_id")))
-            return self.ok(output)
+            return self.ok(self.build_attendance_rows(user, month))
 
         if path == "/api/payroll":
             month = query.get("month", [current_month()])[0]
-            employee_id = integer(user.get("employee_id")) if user.get("role") == "employee" else None
-            return self.ok(self.build_payroll(month, employee_id))
+            return self.ok(self.payroll_page(user, month)["items"])
+
+        if path == "/api/page/payroll":
+            month = query.get("month", [current_month()])[0]
+            return self.ok(self.payroll_page(user, month))
 
         if path == "/api/inventory":
             rows = SB.select(TABLES["inventory"], order="category.asc,name.asc")
@@ -866,19 +1328,7 @@ class RumiHandler(BaseHTTPRequestHandler):
             return self.ok(rows)
 
         if path == "/api/withdrawals":
-            filters = {}
-            if user.get("role") == "employee":
-                filters["employee_id"] = f"eq.{user['employee_id']}"
-            rows = SB.select(TABLES["withdrawals"], filters=filters, order="taken_at.desc,id.desc", limit=300)
-            employees = employee_map(SB.select(TABLES["employees"]))
-            inventory = {integer(x["id"]): x for x in SB.select(TABLES["inventory"])}
-            for item in rows:
-                inv = inventory.get(integer(item.get("inventory_id")), {})
-                emp = employees.get(integer(item.get("employee_id")), {})
-                item["item_name"] = inv.get("name", "Nguyên liệu")
-                item["unit"] = inv.get("unit", "")
-                item["employee_name"] = emp.get("name")
-            return self.ok(rows)
+            return self.ok(self.build_inventory_page(user)["withdrawals"])
 
         if path == "/api/purchase-requests":
             filters = {}
@@ -891,13 +1341,17 @@ class RumiHandler(BaseHTTPRequestHandler):
         if path == "/api/reports":
             self.require_role(user, "admin")
             month = query.get("month", [current_month()])[0]
-            payroll = self.build_payroll(month)
-            attendance = SB.select(TABLES["attendance"], filters={"work_date": f"gte.{month}-01"})
-            employees = SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"})
+            start, end = month_bounds(month)
+            data = parallel_calls(
+                payroll=lambda: self.build_payroll(month),
+                attendance=lambda: SB.select(TABLES["attendance"], filters={"work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"}, columns="hours"),
+                employees=lambda: SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, columns="id"),
+            )
+            payroll = data["payroll"]
             return self.ok({
                 "month": month,
-                "employee_count": len(employees),
-                "total_hours": round(sum(num(x.get("hours")) for x in attendance if str(x.get("work_date", "")).startswith(month)), 2),
+                "employee_count": len(data["employees"]),
+                "total_hours": round(sum(num(x.get("hours")) for x in data["attendance"]), 2),
                 "total_payroll": sum(num(x.get("total")) for x in payroll),
                 "paid_payroll": sum(num(x.get("total")) for x in payroll if x.get("payment_status") == "Đã thanh toán"),
                 "payroll": payroll,
@@ -941,8 +1395,14 @@ class RumiHandler(BaseHTTPRequestHandler):
                     raise APIError("Tài khoản nhân viên đã bị khóa", 403)
             SB.update(TABLES["users"], {"last_login_at": now_iso()}, {"id": f"eq.{user['id']}"})
             LOGIN_ATTEMPTS[ip].clear()
+            profile = public_user(user, employee)
+            user["profile"] = profile
+            user["employee"] = employee
+            USER_CACHE.set(integer(user["id"]), user, 20)
+            dashboard = self.build_dashboard(user)
             token = make_session(integer(user["id"]))
-            return self.ok(public_user(user, employee), "Đăng nhập thành công", headers={"Set-Cookie": self.session_header(token)})
+            return self.ok({"user": profile, "dashboard": dashboard, "unread_count": dashboard.get("unread_count", 0)},
+                           "Đăng nhập thành công", headers={"Set-Cookie": self.session_header(token)})
 
         if path == "/api/auth/logout":
             return self.ok(None, "Đã đăng xuất", headers={"Set-Cookie": self.session_header("", 0)})
@@ -1126,6 +1586,41 @@ class RumiHandler(BaseHTTPRequestHandler):
             self.audit(user, "create", "shift", row["id"], {"employee_id": employee_id, "date": work_date, "time": f"{start}-{end}"})
             return self.ok(row, "Đã xếp ca làm")
 
+        if path == "/api/scheduling/auto-assign":
+            self.require_role(user, "admin")
+            employee_count = max(1, min(integer(body.get("employee_count"), 1), 20))
+            location_id = integer(body.get("location_id"))
+            work_date = parse_date(body.get("shift_date"), "Ngày làm")
+            start = parse_time(body.get("start_time"), "Giờ bắt đầu")
+            end = parse_time(body.get("end_time"), "Giờ kết thúc")
+            required_role = str(body.get("required_role", "")).strip()
+            if not location_id or time_minutes(end) <= time_minutes(start):
+                raise APIError("Thông tin ca làm chưa hợp lệ")
+            locations = SB.select(TABLES["locations"], filters={"id": f"eq.{location_id}", "active": "eq.true"}, limit=1)
+            if not locations:
+                raise APIError("Vị trí cửa hàng không tồn tại hoặc đã tắt")
+            candidates = [x for x in self.candidate_rows(work_date, start, end, required_role=required_role) if x.get("state") == "available"]
+            selected = candidates[:employee_count]
+            if not selected:
+                raise APIError("Không có nhân viên phù hợp. Hãy duyệt lịch rảnh hoặc đổi khung giờ.", 409)
+            rows = [{
+                "employee_id": x["employee_id"], "location_id": location_id, "shift_date": work_date,
+                "start_time": start, "end_time": end, "note": str(body.get("note", "")).strip(),
+                "status": "Đã xếp", "created_by": user["id"], "availability_request_id": x.get("availability_id"),
+            } for x in selected]
+            created = SB.insert_many(TABLES["shifts"], rows)
+            availability_ids = [x.get("availability_id") for x in selected if x.get("availability_id")]
+            if availability_ids:
+                SB.update(TABLES["availability"], {"status": "Đã xếp ca"}, {"id": pg_in(availability_ids)})
+            SB.insert_many(TABLES["notifications"], [{
+                "employee_id": x["employee_id"], "title": "Bạn có ca làm mới",
+                "message": f"Ngày {work_date}, {start}–{end} tại {locations[0]['name']}.",
+                "type": "schedule", "link": "shifts",
+            } for x in selected])
+            self.audit(user, "auto_assign", "shift", "bulk", {"date": work_date, "time": f"{start}-{end}", "count": len(created), "requested": employee_count})
+            message = f"Đã xếp tự động {len(created)}/{employee_count} nhân viên phù hợp"
+            return self.ok(self.enriched_shifts(created), message)
+
         if path == "/api/shift-change-requests":
             self.require_role(user, "employee")
             shift_id = integer(body.get("shift_id"))
@@ -1191,24 +1686,55 @@ class RumiHandler(BaseHTTPRequestHandler):
             shift = shifts[0]
             check_in = parse_time(body.get("check_in"), "Giờ vào")
             check_out = parse_time(body.get("check_out"), "Giờ ra") if body.get("check_out") else None
-            hours = calculate_hours(check_in, check_out)
+            metrics = attendance_metrics(shift, check_in, check_out)
             row = SB.upsert(TABLES["attendance"], {
-                "shift_id": shift_id,
-                "employee_id": shift["employee_id"],
-                "work_date": shift["shift_date"],
-                "check_in": check_in,
-                "check_out": check_out,
-                "hours": hours,
-                "status": "Hoàn thành" if check_out else "Đang làm",
+                "shift_id": shift_id, "employee_id": shift["employee_id"], "work_date": shift["shift_date"],
+                "check_in": check_in, "check_out": check_out, "hours": metrics["payable_hours"],
+                "scheduled_hours": metrics["scheduled_hours"], "payable_hours": metrics["payable_hours"],
+                "late_minutes": metrics["late_minutes"], "early_leave_minutes": metrics["early_leave_minutes"],
+                "overtime_minutes": metrics["overtime_minutes"], "status": metrics["status"],
+                "calculation_note": metrics["calculation_note"],
                 "note": str(body.get("note", "Điều chỉnh bởi quản lý")).strip(),
             }, "shift_id")
             self.audit(user, "manual_update", "attendance", row.get("id"), {"shift_id": shift_id})
             return self.ok(row, "Đã cập nhật chấm công")
 
+        if path == "/api/payroll/generate":
+            self.require_role(user, "admin")
+            month = str(body.get("month", ""))
+            month_bounds(month)
+            data = self.save_payroll_draft(user, month, str(body.get("note", "")).strip())
+            self.audit(user, "generate", "payroll", month, {"employee_count": len(data.get("items", []))})
+            return self.ok(data, "Đã tạo lại bảng lương tháng")
+
+        if path == "/api/payroll/lock":
+            self.require_role(user, "admin")
+            month = str(body.get("month", ""))
+            month_bounds(month)
+            data = self.save_payroll_draft(user, month, str(body.get("note", "")).strip())
+            run_id = data["run"]["id"]
+            SB.update(TABLES["payroll_runs"], {"status": "Đã chốt", "locked_at": now_iso()}, {"id": f"eq.{run_id}"})
+            self.audit(user, "lock", "payroll", month)
+            return self.ok(self.payroll_page(user, month), "Đã chốt bảng lương tháng")
+
+        if path == "/api/payroll/unlock":
+            self.require_role(user, "admin")
+            month = str(body.get("month", ""))
+            month_bounds(month)
+            run = self.payroll_run(month)
+            if not run:
+                raise APIError("Tháng này chưa có bảng lương", 404)
+            SB.update(TABLES["payroll_runs"], {"status": "Nháp", "locked_at": None}, {"id": f"eq.{run['id']}"})
+            self.audit(user, "unlock", "payroll", month)
+            return self.ok(self.payroll_page(user, month), "Đã mở khóa bảng lương")
+
         if path == "/api/payroll/adjustment":
             self.require_role(user, "admin")
             employee_id = integer(body.get("employee_id"))
             month = str(body.get("month", ""))
+            run = self.payroll_run(month) if re.fullmatch(r"\d{4}-\d{2}", month) else None
+            if run and run.get("status") == "Đã chốt":
+                raise APIError("Bảng lương đã chốt, không thể sửa thưởng/phạt.", 409)
             if not employee_id or not re.fullmatch(r"\d{4}-\d{2}", month):
                 raise APIError("Tháng lương không hợp lệ")
             row = SB.upsert(TABLES["payroll_adjustments"], {"employee_id": employee_id, "month": month, "bonus": num(body.get("bonus")), "penalty": num(body.get("penalty")), "advance_pay": num(body.get("advance_pay")), "note": str(body.get("note", "")).strip()}, "employee_id,month")
@@ -1492,7 +2018,7 @@ def main() -> None:
         raise SystemExit(2) from exc
     server = ThreadingHTTPServer((host, port), RumiHandler)
     print("=" * 68)
-    print("RUMI Manager v4.4 Vercel đang chạy")
+    print("RUMI Manager v5.3 OPERATIONS đang chạy")
     print(f"Mở trên máy này: http://localhost:{port}")
     print(f"Tài khoản admin: {ADMIN_USERNAME}")
     if os.environ.get("RUMI_ADMIN_PASSWORD"):

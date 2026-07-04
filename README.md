@@ -1,51 +1,57 @@
-# RUMI Manager 5.0 — Vercel + Supabase
+# RUMI Manager 5.3 OPERATIONS
 
-Bản nâng cấp giao diện và trải nghiệm vận hành cho quán trà sữa RUMI.
+Bản nâng cấp tập trung vào luồng vận hành hoàn chỉnh:
 
-## Điểm mới
+1. Nhân viên đăng ký lịch rảnh.
+2. Admin nhập ngày, giờ, cửa hàng, vị trí công việc và số người cần.
+3. Hệ thống xếp hạng người phù hợp theo lịch rảnh đã duyệt, trùng ca, nghỉ phép, đúng vị trí và tổng giờ trong tuần.
+4. Admin chọn thủ công hoặc **Xếp tự động** nhiều nhân viên.
+5. Nhân viên chấm công vào/ra bằng GPS và đúng khung giờ.
+6. Hệ thống tự tính giờ theo lịch, giờ thực tế, giờ tính lương, đi trễ, về sớm và tăng ca.
+7. Admin tạo bản nháp, kiểm tra, điều chỉnh và chốt bảng lương tháng.
+8. Xuất bảng công, bảng lương CSV dùng được với Excel và in phiếu lương từng nhân viên.
 
-- Dashboard ưu tiên việc cần xử lý và thao tác nhanh.
-- Lịch làm dạng tuần cho admin và nhân viên.
-- Tìm kiếm, lọc theo trạng thái/vị trí/nhóm nguyên liệu.
-- Xuất CSV: nhân viên, lịch làm, bảng công, bảng lương, tồn kho, lịch sử lấy hàng, cần mua và báo cáo.
-- Chấm công GPS có bước kiểm tra độ chính xác trước khi vào/ra ca.
-- Giao diện responsive, bảng tự chuyển thành thẻ trên điện thoại.
-- Thanh điều hướng dưới màn hình trên mobile.
-- Tìm nhanh toàn hệ thống bằng nút kính lúp hoặc phím `/`.
-- Không thay đổi cấu trúc dữ liệu; tiếp tục dùng các bảng `rumi_*` trong Supabase của IC3.
+## Nâng cấp cơ sở dữ liệu
 
-## Nâng cấp project đang chạy
+Dự án mới cài lần đầu:
 
-Giải nén ZIP, sau đó ghi đè mã nguồn vào repository hiện tại:
+1. Chạy `sql/SUPABASE_RUMI_V4_FULL.sql`.
+2. Chạy `sql/SUPABASE_RUMI_V5_3_OPERATIONS.sql`.
+
+Dự án đang chạy RUMI v5.2 chỉ cần chạy file thứ hai.
+
+Migration chỉ tạo hoặc sửa bảng/hàm có tiền tố `rumi_`, không đọc hay sửa bảng IC3 Smart Class.
+
+## Bảng mới
+
+- `rumi_payroll_runs`: trạng thái bảng lương từng tháng.
+- `rumi_payroll_items`: số liệu bảng lương đã lưu/chốt theo nhân viên.
+
+Bảng `rumi_attendance` được bổ sung các cột chi tiết giờ công.
+
+## Kiểm tra
 
 ```bash
-cd ~/Downloads
-unzip -o RUMI-Manager-Supabase-v5.0-Vercel.zip
-
-rsync -av --delete \
-  --exclude='.git' \
-  --exclude='.env' \
-  RUMI-Manager-Supabase-v5.0-Vercel/ \
-  RUMI-Manager-Supabase-v4.4-Vercel/
-
-cd RUMI-Manager-Supabase-v4.4-Vercel
-git add -A
-git commit -m "Upgrade RUMI Manager 5.0 UI and features"
-git push
+python3 self_test.py
+python3 verify_setup.py
 ```
 
-Vercel sẽ tự deploy commit mới. Các Environment Variables hiện tại được giữ nguyên.
+## Chạy máy cá nhân
 
-## Kiểm tra sau deploy
+```bash
+python3 server.py
+```
 
-- `/login`: màn hình đăng nhập.
-- `/api/health`: trạng thái Supabase, phiên bản `5.0`.
-- Đăng nhập admin: kiểm tra Dashboard, Nhân viên, Xếp lịch, Kho và Báo cáo.
-- Đăng nhập nhân viên: kiểm tra Lịch làm, Đăng ký lịch rảnh và Chấm công GPS.
+Mở `http://localhost:8000`.
 
-## Kỹ thuật
+## Đẩy lên Vercel
 
-- Frontend: HTML/CSS/JavaScript thuần, phục vụ từ thư mục `public/` của Vercel.
-- Backend: Flask/Python Function tại `api/index.py`.
-- Database: Supabase/PostgreSQL, chỉ dùng bảng/hàm có tiền tố `rumi_`.
-- Python: 3.12 qua `.python-version`.
+Giữ nguyên Environment Variables đang có. Ghi đè mã nguồn vào repository hiện tại, commit và push. Vercel tự triển khai commit mới.
+
+Sau deploy, kiểm tra:
+
+```text
+https://TEN-DU-AN.vercel.app/api/health
+```
+
+Kết quả cần có `"version": "5.3"` và `"operations_ready": true`.

@@ -4,16 +4,21 @@ const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const today = () => new Date().toISOString().slice(0, 10);
 const monthNow = () => new Date().toISOString().slice(0, 7);
-const APP_VERSION = '5.0.0';
+const APP_VERSION = '5.3.0';
 const state = {
   user: null,
   page: 'dashboard',
   month: monthNow(),
   requestTab: 'availability',
   candidates: [],
-  candidateQuery: { date: today(), start: '08:00', end: '12:00', location_id: '' },
+  candidateQuery: { date: today(), start: '08:00', end: '12:00', location_id: '', required_role: '', employee_count: '1' },
   cache: {},
+  prefetchedDashboard: null,
+  lastUnreadRefresh: 0,
 };
+
+const apiMemory = new Map();
+const apiInflight = new Map();
 
 const icons = {
   dashboard: '<svg viewBox="0 0 24 24"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg>',
@@ -73,19 +78,42 @@ function stat(label, value, note, icon = 'dashboard', tone = '') { return `<arti
 function person(name, sub = '') { return `<div class="person-cell"><span class="avatar">${esc(initials(name))}</span><span><span class="cell-main">${esc(name || '—')}</span><span class="cell-sub">${esc(sub)}</span></span></div>`; }
 function intro(eyebrow, title, description, actions = '') { return `<div class="page-intro"><div><span class="eyebrow">${esc(eyebrow)}</span><h2>${esc(title)}</h2><p>${esc(description)}</p></div><div class="page-intro-actions">${actions}</div></div>`; }
 
+function apiTtl(path) {
+  if (path.includes('/notifications/unread-count')) return 30000;
+  if (path.includes('/settings') || path.includes('/locations')) return 30000;
+  if (path.includes('/employees')) return 15000;
+  return 10000;
+}
+function clearApiCache() { apiMemory.clear(); apiInflight.clear(); }
 async function api(path, options = {}) {
-  const method = options.method || 'GET';
-  const headers = { ...(options.headers || {}) };
-  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
-  if (method !== 'GET') headers['X-RUMI-Request'] = '1';
-  const response = await fetch(path, { method, headers, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
-  let payload;
-  try { payload = await response.json(); } catch { payload = { ok:false, message:'Máy chủ trả về dữ liệu không hợp lệ' }; }
-  if (!response.ok || !payload.ok) {
-    if (response.status === 401 && !path.includes('/auth/login')) showLogin();
-    throw new Error(payload.message || 'Có lỗi xảy ra');
+  const method = (options.method || 'GET').toUpperCase();
+  const cacheable = method === 'GET' && options.cache !== false;
+  const now = Date.now();
+  if (cacheable && !options.force) {
+    const cached = apiMemory.get(path);
+    if (cached && cached.expires > now) return cached.data;
+    if (apiInflight.has(path)) return apiInflight.get(path);
   }
-  return payload.data;
+  const task = (async () => {
+    const headers = { Accept: 'application/json', ...(options.headers || {}) };
+    if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+    if (method !== 'GET') headers['X-RUMI-Request'] = '1';
+    const response = await fetch(path, {
+      method, headers, credentials: 'same-origin',
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+    let payload;
+    try { payload = await response.json(); } catch { payload = { ok:false, message:'Máy chủ trả về dữ liệu không hợp lệ' }; }
+    if (!response.ok || !payload.ok) {
+      if (response.status === 401 && !path.includes('/auth/login')) showLogin();
+      throw new Error(payload.message || 'Có lỗi xảy ra');
+    }
+    if (cacheable) apiMemory.set(path, { data: payload.data, expires: Date.now() + apiTtl(path) });
+    else clearApiCache();
+    return payload.data;
+  })();
+  if (cacheable) apiInflight.set(path, task);
+  try { return await task; } finally { if (cacheable) apiInflight.delete(path); }
 }
 
 function toast(message, type = 'success') {
@@ -96,7 +124,7 @@ function toast(message, type = 'success') {
   root.appendChild(node);
   setTimeout(() => node.remove(), 4200);
 }
-function loading() { $('#page').innerHTML = '<div class="loading-screen"><span class="loader"></span><p>Đang đồng bộ dữ liệu...</p></div>'; }
+function loading() { $('#page').innerHTML = '<div class="loading-screen"><span class="loader"></span><p>Đang tải dữ liệu RUMI...</p><div class="loading-hint">Các trang vừa mở sẽ được lưu tạm để chuyển lại nhanh hơn.</div></div>'; }
 function openModal(title, subtitle, content, wide = false) {
   $('#modal-root').innerHTML = `<div class="modal-backdrop" data-action="close-modal"><section class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><header class="modal-head"><div><h3>${esc(title)}</h3><p>${esc(subtitle)}</p></div><button class="modal-close" data-action="close-modal">${icons.x}</button></header><div class="modal-body">${content}</div></section></div>`;
   setTimeout(() => $('#modal-root input, #modal-root select')?.focus(), 50);
@@ -115,6 +143,8 @@ function authLayout(card) {
 }
 function showLogin() {
   state.user = null;
+  state.prefetchedDashboard = null;
+  clearApiCache();
   history.replaceState(null, '', '/#login');
   $('#app-root').classList.add('hidden');
   $('#auth-root').classList.remove('hidden');
@@ -129,8 +159,10 @@ function buildNav() {
     return `${heading}<button class="nav-button ${state.page === id ? 'active' : ''}" data-nav="${id}">${icons[icon]}<span>${esc(label)}</span>${id === 'notifications' && state.cache.unread ? `<span class="nav-badge">${state.cache.unread}</span>` : ''}</button>`;
   }).join('');
 }
-function enterApp(user) {
+function enterApp(user, dashboard = null, unreadCount = null) {
   state.user = user;
+  state.prefetchedDashboard = dashboard;
+  if (unreadCount != null) state.cache.unread = Number(unreadCount || 0);
   history.replaceState(null, '', '/#dashboard');
   $('#auth-root').classList.add('hidden');
   $('#app-root').classList.remove('hidden');
@@ -146,6 +178,22 @@ function enterApp(user) {
   updateClock(); buildNav(); navigate('dashboard');
 }
 
+function applyUnreadCount(value, rebuild = true) {
+  state.cache.unread = Number(value || 0);
+  state.lastUnreadRefresh = Date.now();
+  const count = $('#notification-count');
+  if (count) {
+    count.textContent = state.cache.unread;
+    count.classList.toggle('hidden', !state.cache.unread);
+  }
+  if (rebuild && state.user) buildNav();
+}
+function takeDashboardData() {
+  const data = state.prefetchedDashboard;
+  state.prefetchedDashboard = null;
+  return data;
+}
+
 const titles = { dashboard:'Tổng quan', employees:'Quản lý nhân viên', schedule:'Xếp lịch làm', shifts:'Lịch làm của tôi', availability:'Đăng ký lịch rảnh', requests:'Yêu cầu & phê duyệt', attendance:'Chấm công & bảng công', payroll:'Bảng lương', inventory:'Kho nguyên liệu', purchases:'Danh sách cần mua', locations:'Vị trí & quy định', reports:'Báo cáo', notifications:'Thông báo' };
 async function navigate(page) {
   state.page = page;
@@ -156,23 +204,20 @@ async function navigate(page) {
     const fn = { dashboard:renderDashboard, employees:renderEmployees, schedule:renderSchedule, shifts:renderMyShifts, availability:renderAvailability, requests:renderRequests, attendance:renderAttendance, payroll:renderPayroll, inventory:renderInventory, purchases:renderPurchases, locations:renderLocations, reports:renderReports, notifications:renderNotifications }[page];
     if (!fn) return navigate('dashboard');
     await fn();
-    await refreshUnread(false);
+    if (page !== 'notifications' && Date.now() - state.lastUnreadRefresh > 30000) refreshUnread(false);
   } catch (err) { $('#page').innerHTML = `<div class="card">${empty('Không tải được dữ liệu', err.message, 'info')}</div>`; toast(err.message, 'error'); }
 }
 async function refreshUnread(rebuild = true) {
   if (!state.user) return;
   try {
-    const rows = await api('/api/notifications');
-    state.cache.unread = rows.filter(x => !x.read_at).length;
-    const count = $('#notification-count');
-    count.textContent = state.cache.unread;
-    count.classList.toggle('hidden', !state.cache.unread);
-    if (rebuild) buildNav();
+    const result = await api('/api/notifications/unread-count');
+    applyUnreadCount(result.count, rebuild);
   } catch {}
 }
 
 async function renderDashboard() {
-  const d = await api('/api/dashboard');
+  const d = takeDashboardData() || await api('/api/dashboard');
+  applyUnreadCount(d.unread_count, false);
   if (state.user.role === 'admin') {
     const s = d.stats;
     $('#page').innerHTML = `<section class="hero-card"><div class="hero-copy"><span class="eyebrow">RUMI HÔM NAY</span><h2>Vận hành gọn gàng, phục vụ thật ngon.</h2><p>Kiểm tra nhân sự, lịch làm, yêu cầu đang chờ và nguyên liệu sắp hết trước khi bắt đầu một ngày mới.</p></div><div class="hero-actions"><button class="btn secondary" data-nav="schedule">${icons.calendar} Xếp ca</button><button class="btn secondary" data-nav="requests">${icons.request} Duyệt yêu cầu</button></div></section><section class="stats-grid">${stat('Nhân viên hoạt động',s.employees,'Tài khoản đang sử dụng','users')}${stat('Ca làm hôm nay',s.shifts_today,'Theo lịch đã xếp','calendar','blue')}${stat('Đang trong ca',s.working_now,'Đã chấm công vào','clock','green')}${stat('Lịch rảnh chờ duyệt',s.pending_schedule,'Cần quản lý xử lý','request','amber')}${stat('Nghỉ / thay ca',s.pending_requests,'Yêu cầu đang chờ','request','red')}${stat('Nguyên liệu sắp hết',s.low_stock,'Bằng hoặc dưới định mức','box','red')}${stat('Mặt hàng cần mua',s.pending_purchase,'Chưa đánh dấu đã mua','cart','amber')}${stat('Lương dự kiến tháng',money(s.payroll_total),'Tính từ giờ công hợp lệ','money','green')}</section><section class="grid-2"><div class="card"><div class="card-head"><div><h3>Ca làm hôm nay</h3><p>Tiến độ chấm công theo từng nhân viên</p></div><button class="btn small secondary" data-nav="schedule">Xem lịch</button></div><div class="card-body">${shiftList(d.today_shifts)}</div></div><div class="card"><div class="card-head"><div><h3>Thông báo mới</h3><p>Các thay đổi cần quản lý chú ý</p></div><button class="btn small secondary" data-nav="notifications">Xem tất cả</button></div><div class="card-body">${notificationList(d.notifications)}</div></div></section>`;
@@ -200,7 +245,8 @@ function employeeForm(x = null) { return `<form class="form-grid" data-form="${x
 
 async function renderSchedule() {
   if (state.user.role !== 'admin') return navigate('dashboard');
-  const [shifts, locations] = await Promise.all([api('/api/shifts?start='+today()), api('/api/locations')]);
+  const pageData = await api(`/api/page/schedule?start=${today()}&end=2099-12-31`);
+  const shifts = pageData.shifts, locations = pageData.locations;
   state.cache.shifts = shifts; state.cache.locations = locations;
   if (!state.candidateQuery.location_id && locations[0]) state.candidateQuery.location_id = locations[0].id;
   const q = state.candidateQuery;
@@ -220,13 +266,15 @@ async function renderAvailability() {
 }
 
 async function renderRequests() {
-  if (state.user.role === 'admin') return renderAdminRequests();
-  const [leaves, changes, shifts] = await Promise.all([api('/api/leaves'), api('/api/shift-change-requests'), api('/api/shifts?start='+today())]);
+  const pageData = await api('/api/page/requests');
+  if (state.user.role === 'admin') return renderAdminRequests(pageData);
+  const leaves = pageData.leaves, changes = pageData.changes, shifts = pageData.upcoming_shifts;
   state.cache.myShifts = shifts;
   $('#page').innerHTML = `${intro('YÊU CẦU CÁ NHÂN','Xin nghỉ và tìm người thay ca','Mọi thay đổi chỉ có hiệu lực sau khi quản lý phê duyệt.')}<section class="grid-2"><div class="card"><div class="card-head"><div><h3>Gửi đơn xin nghỉ</h3><p>Dùng cho một hoặc nhiều ngày</p></div></div><div class="card-body"><form class="form-grid" data-form="leave-create"><div class="field"><label>Từ ngày</label><input type="date" name="start_date" min="${today()}" required></div><div class="field"><label>Đến ngày</label><input type="date" name="end_date" min="${today()}" required></div><div class="field span-2"><label>Lý do</label><textarea name="reason" required placeholder="Nhập lý do xin nghỉ"></textarea></div><div class="form-actions"><button class="btn" type="submit">${icons.request} Gửi đơn</button></div></form></div></div><div class="card"><div class="card-head"><div><h3>Yêu cầu người thay ca</h3><p>Quản lý sẽ tìm nhân viên rảnh phù hợp</p></div></div><div class="card-body"><form class="form-grid" data-form="shift-change-create"><div class="field span-2"><label>Ca cần thay</label><select name="shift_id" required><option value="">Chọn ca làm</option>${shifts.map(x=>`<option value="${x.id}">${dateVN(x.shift_date)} · ${x.start_time}–${x.end_time} · ${esc(x.location_name||'')}</option>`).join('')}</select></div><div class="field"><label>Loại yêu cầu</label><select name="request_type"><option>Tìm người thay</option><option>Đổi ca</option><option>Xin nghỉ ca</option></select></div><div class="field"><label>Lý do</label><input name="reason" required></div><div class="form-actions"><button class="btn" type="submit">${icons.request} Gửi yêu cầu</button></div></form></div></div></section><section class="grid-2 section-gap"><div class="card"><div class="card-head"><h3>Đơn xin nghỉ</h3></div><div class="card-body">${leaves.length?`<div class="list">${leaves.map(x=>`<div class="list-row"><span class="list-icon">${icons.calendar}</span><div class="list-copy"><strong>${dateVN(x.start_date)} – ${dateVN(x.end_date)}</strong><span>${esc(x.reason)}${x.admin_note?` · ${esc(x.admin_note)}`:''}</span></div>${badge(x.status)}</div>`).join('')}</div>`:empty('Chưa có đơn nghỉ','Các đơn đã gửi sẽ xuất hiện tại đây.','request')}</div></div><div class="card"><div class="card-head"><h3>Yêu cầu thay ca</h3></div><div class="card-body">${changes.length?`<div class="list">${changes.map(x=>`<div class="list-row"><span class="list-icon">${icons.request}</span><div class="list-copy"><strong>${dateVN(x.shift?.shift_date)} · ${esc(x.shift?.start_time||'')}–${esc(x.shift?.end_time||'')}</strong><span>${esc(x.reason)}${x.replacement_name?` · Thay bởi ${esc(x.replacement_name)}`:''}</span></div>${badge(x.status)}</div>`).join('')}</div>`:empty('Chưa có yêu cầu thay ca','Chọn một ca sắp tới để gửi yêu cầu.','request')}</div></div></section>`;
 }
-async function renderAdminRequests() {
-  const [availability, leaves, changes] = await Promise.all([api('/api/availability'),api('/api/leaves'),api('/api/shift-change-requests')]);
+async function renderAdminRequests(pageData = null) {
+  const data = pageData || await api('/api/page/requests');
+  const availability = data.availability, leaves = data.leaves, changes = data.changes;
   state.cache.availability=availability; state.cache.leaves=leaves; state.cache.changes=changes;
   const tabs = `<div class="tabs"><button class="tab ${state.requestTab==='availability'?'active':''}" data-action="request-tab" data-tab="availability">Lịch rảnh (${availability.filter(x=>x.status==='Chờ duyệt').length})</button><button class="tab ${state.requestTab==='leaves'?'active':''}" data-action="request-tab" data-tab="leaves">Xin nghỉ (${leaves.filter(x=>x.status==='Chờ duyệt').length})</button><button class="tab ${state.requestTab==='changes'?'active':''}" data-action="request-tab" data-tab="changes">Thay ca (${changes.filter(x=>x.status==='Chờ xử lý').length})</button></div>`;
   $('#page').innerHTML = `${intro('PHÊ DUYỆT','Yêu cầu từ nhân viên','Duyệt thời gian rảnh, đơn nghỉ và tìm nhân viên phù hợp để thay ca.')}${tabs}<div id="request-content">${adminRequestContent()}</div>`;
@@ -249,7 +297,8 @@ async function renderAttendance() {
   $('#page').innerHTML=`${intro('BẢNG CÔNG','Theo dõi chấm công','Admin xem toàn bộ giờ vào, giờ ra, vị trí và có thể điều chỉnh khi có lý do chính đáng.')}<div class="toolbar"><div class="toolbar-left"><input type="month" id="attendance-month" value="${state.month}"></div></div><div class="table-wrap"><table><thead><tr><th>Nhân viên</th><th>Ngày</th><th>Ca</th><th>Giờ vào</th><th>Giờ ra</th><th>Số giờ</th><th>Vị trí GPS</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${person(x.employee_name,x.employee_code)}</td><td>${dateVN(x.work_date)}</td><td>${x.shift?`${x.shift.start_time}–${x.shift.end_time}`:'Ngoài lịch'}</td><td>${esc(x.check_in)}</td><td>${esc(x.check_out||'—')}</td><td>${number(x.hours,2)} giờ</td><td><span class="cell-main">${x.check_in_distance_m!=null?`${number(x.check_in_distance_m,1)} m`:'Thủ công'}</span><span class="cell-sub">${x.check_in_accuracy_m?`Sai số ${number(x.check_in_accuracy_m,0)} m`:''}</span></td><td>${badge(x.status)}</td><td><button class="btn small secondary" data-action="attendance-edit" data-id="${x.shift_id||''}" ${!x.shift_id?'disabled':''}>${icons.edit}</button></td></tr>`).join('')||`<tr><td colspan="9">${empty('Chưa có dữ liệu công','Dữ liệu xuất hiện sau khi nhân viên chấm công.','clock')}</td></tr>`}</tbody></table></div>`;
 }
 async function renderEmployeeAttendance(){
-  const [todayShifts,history,settings]=await Promise.all([api('/api/attendance/today'),api(`/api/attendance?month=${state.month}`),api('/api/settings')]);
+  const pageData=await api(`/api/page/attendance?month=${state.month}`);
+  const todayShifts=pageData.today_shifts, history=pageData.history, settings=pageData.settings;
   state.cache.todayShifts=todayShifts;
   $('#page').innerHTML=`${intro('CHẤM CÔNG GPS','Vào và ra ca đúng cửa hàng','Trình duyệt sẽ xin quyền vị trí. GPS phải nằm trong bán kính cửa hàng và đúng khung giờ.')}<div class="info-banner">${icons.info}<div><strong>Khung giờ mặc định</strong><span>Vào ca: trước ${settings.checkin_before_minutes} phút đến sau ${settings.checkin_after_minutes} phút. Ra ca: trước ${settings.checkout_before_minutes} phút đến sau ${settings.checkout_after_minutes} phút. Sai số GPS tối đa ${settings.max_gps_accuracy_m} m.</span></div></div><div class="grid-3">${todayShifts.length?todayShifts.map(x=>clockCard(x)):empty('Hôm nay không có ca','Bạn chỉ có thể chấm công cho ca đã được admin xếp.','calendar')}</div><div class="section-gap card"><div class="card-head"><div><h3>Lịch sử công tháng ${state.month}</h3><p>${history.length} lượt chấm công</p></div><input class="compact-input" type="month" id="attendance-month" value="${state.month}"></div><div class="card-body">${history.length?`<div class="list">${history.map(x=>`<div class="list-row"><span class="list-icon">${icons.clock}</span><div class="list-copy"><strong>${dateVN(x.work_date)} · ${esc(x.check_in)}–${esc(x.check_out||'Chưa ra')}</strong><span>${number(x.hours,2)} giờ · ${esc(x.shift?.location_name||'')}</span></div>${badge(x.status)}</div>`).join('')}</div>`:empty('Chưa có giờ công','Sau khi chấm công, lịch sử sẽ xuất hiện tại đây.','clock')}</div></div>`;
 }
@@ -262,7 +311,7 @@ async function renderPayroll(){
 }
 
 async function renderInventory(){
-  const [items,withdrawals,employees]=await Promise.all([api('/api/inventory'),api('/api/withdrawals'),api('/api/employees/public')]);
+  const pageData=await api('/api/page/inventory');const items=pageData.items,withdrawals=pageData.withdrawals,employees=pageData.employees;
   state.cache.inventory=items;state.cache.withdrawals=withdrawals;state.cache.publicEmployees=employees;
   const admin=state.user.role==='admin';
   $('#page').innerHTML=`${intro('KHO NGUYÊN LIỆU',admin?'Quản lý tồn kho':'Ghi nhận nguyên liệu đã lấy','Sau khi ghi nhận lấy hàng, số lượng tồn tự động giảm và tạo đề xuất mua khi xuống thấp.',`${admin?`<button class="btn secondary" data-action="inventory-add">${icons.plus} Thêm nguyên liệu</button>`:''}<button class="btn" data-action="inventory-withdraw">${icons.box} Ghi nhận lấy hàng</button>`)}<div class="grid-2"><div class="card"><div class="card-head"><div><h3>Tồn kho hiện tại</h3><p>${items.filter(x=>Number(x.quantity)<=Number(x.min_stock)).length} mặt hàng dưới định mức</p></div></div><div class="card-body">${items.length?items.map(x=>{const ratio=Math.min(100,Number(x.quantity)/(Math.max(Number(x.min_stock)*2,1))*100);const low=Number(x.quantity)<=Number(x.min_stock);return `<div class="stock-line"><div><strong>${esc(x.name)}</strong><small>${esc(x.category)} · Tối thiểu ${number(x.min_stock,2)} ${esc(x.unit)}</small></div><div class="progress ${low?'danger':''}"><span style="width:${ratio}%"></span></div><div class="stock-qty">${number(x.quantity,2)} ${esc(x.unit)}</div>${admin?`<div class="actions"><button class="btn small secondary icon-only" data-action="inventory-restock" data-id="${x.id}">${icons.plus}</button><button class="btn small ghost icon-only" data-action="inventory-edit" data-id="${x.id}">${icons.edit}</button></div>`:''}</div>`}).join(''):empty('Kho đang trống','Admin hãy thêm nguyên liệu đầu tiên.','box')}</div></div><div class="card"><div class="card-head"><div><h3>Lịch sử lấy hàng</h3><p>Gần nhất</p></div></div><div class="card-body">${withdrawals.length?`<div class="list">${withdrawals.slice(0,20).map(x=>`<div class="list-row"><span class="list-icon">${icons.box}</span><div class="list-copy"><strong>${esc(x.item_name)} · ${number(x.quantity,2)} ${esc(x.unit)}</strong><span>${dateVN(x.taken_at)} · ${esc(x.employee_name||'Quản lý')} · ${esc(x.note||'Không ghi chú')}</span></div></div>`).join('')}</div>`:empty('Chưa có lượt lấy hàng','Mỗi lần lấy nguyên liệu sẽ được lưu lại.','box')}</div></div></div>`;
@@ -275,7 +324,7 @@ async function renderPurchases(){
 
 async function renderLocations(){
   if(state.user.role!=='admin')return navigate('dashboard');
-  const [locations,settings]=await Promise.all([api('/api/locations'),api('/api/settings')]);state.cache.locations=locations;state.cache.settings=settings;
+  const pageData=await api('/api/page/locations');const locations=pageData.locations,settings=pageData.settings;state.cache.locations=locations;state.cache.settings=settings;
   $('#page').innerHTML=`${intro('CẤU HÌNH CỬA HÀNG','Vị trí GPS và quy định chấm công','Admin thêm tọa độ từng cửa hàng và điều chỉnh khung giờ chấm công.',`<button class="btn" data-action="location-add">${icons.plus} Thêm vị trí</button>`)}<div class="grid-2"><div class="card"><div class="card-head"><div><h3>Vị trí cửa hàng</h3><p>Dùng để tính khoảng cách GPS</p></div></div><div class="card-body">${locations.length?`<div class="list">${locations.map(x=>`<div class="list-row"><span class="list-icon">${icons.location}</span><div class="list-copy"><strong>${esc(x.name)}</strong><span>${esc(x.address||'Chưa có địa chỉ')} · ${number(x.latitude,6)}, ${number(x.longitude,6)} · Bán kính ${x.radius_m} m</span></div>${badge(x.active?'Hoạt động':'Đã tắt')}<button class="btn small secondary icon-only" data-action="location-edit" data-id="${x.id}">${icons.edit}</button></div>`).join('')}</div>`:empty('Chưa có vị trí','Thêm cửa hàng để kích hoạt chấm công GPS.','location')}</div></div><div class="card"><div class="card-head"><div><h3>Quy định chấm công</h3><p>Áp dụng cho tất cả cửa hàng</p></div></div><div class="card-body"><form class="form-grid" data-form="settings-update"><div class="field"><label>Vào trước (phút)</label><input type="number" name="checkin_before_minutes" min="0" value="${settings.checkin_before_minutes??15}"></div><div class="field"><label>Vào trễ tối đa (phút)</label><input type="number" name="checkin_after_minutes" min="0" value="${settings.checkin_after_minutes??5}"></div><div class="field"><label>Ra trước (phút)</label><input type="number" name="checkout_before_minutes" min="0" value="${settings.checkout_before_minutes??5}"></div><div class="field"><label>Ra sau tối đa (phút)</label><input type="number" name="checkout_after_minutes" min="0" value="${settings.checkout_after_minutes??5}"></div><div class="field span-2"><label>Sai số GPS tối đa (m)</label><input type="number" name="max_gps_accuracy_m" min="10" value="${settings.max_gps_accuracy_m??150}"></div><input type="hidden" name="timezone" value="Asia/Ho_Chi_Minh"><div class="form-actions"><button class="btn" type="submit">${icons.check} Lưu quy định</button></div></form></div></div></div>`;
 }
 
@@ -296,11 +345,11 @@ function fd(form){return Object.fromEntries(new FormData(form).entries());}
 async function handleForm(form){
   const type=form.dataset.form;const data=fd(form);const submit=$('button[type="submit"]',form);if(submit)submit.disabled=true;
   try{
-    if(type==='login'){const user=await api('/api/auth/login',{method:'POST',body:data});enterApp(user);toast('Đăng nhập thành công');return;}
+    if(type==='login'){const result=await api('/api/auth/login',{method:'POST',body:data});const user=result.user||result;enterApp(user,result.dashboard||null,result.unread_count);toast('Đăng nhập thành công');return;}
     if(type==='change-password'){await api('/api/auth/change-password',{method:'POST',body:data});closeModal();toast('Đã đổi mật khẩu');return;}
     if(type==='employee-create'){await api('/api/employees',{method:'POST',body:data});closeModal();toast('Đã tạo nhân viên và tài khoản');return navigate('employees');}
     if(type==='employee-edit'){await api(`/api/employees/${form.dataset.id}`,{method:'PUT',body:data});closeModal();toast('Đã cập nhật nhân viên');return navigate('employees');}
-    if(type==='candidate-search'){state.candidateQuery={...data};state.candidates=await api(`/api/scheduling/candidates?date=${encodeURIComponent(data.date)}&start=${encodeURIComponent(data.start)}&end=${encodeURIComponent(data.end)}`);toast(`Tìm thấy ${state.candidates.filter(x=>x.state==='available').length} nhân viên rảnh`);return renderSchedule();}
+    if(type==='candidate-search'){state.candidateQuery={...data};state.candidates=await api(`/api/scheduling/candidates?date=${encodeURIComponent(data.date)}&start=${encodeURIComponent(data.start)}&end=${encodeURIComponent(data.end)}&role=${encodeURIComponent(data.required_role||'')}`);toast(`Tìm thấy ${state.candidates.filter(x=>x.state==='available').length} nhân viên rảnh`);return renderSchedule();}
     if(type==='shift-create'){await api('/api/shifts',{method:'POST',body:{...data,force:data.force==='on'}});closeModal();state.candidates=[];toast('Đã xếp ca và gửi thông báo');return navigate('schedule');}
     if(type==='availability-create'){await api('/api/availability',{method:'POST',body:data});toast('Đã gửi lịch rảnh');form.reset();return navigate('availability');}
     if(type==='leave-create'){await api('/api/leaves',{method:'POST',body:data});toast('Đã gửi đơn xin nghỉ');return navigate('requests');}
@@ -378,8 +427,8 @@ $('#menu-button').addEventListener('click',openSidebar);$('#mobile-overlay').add
       return showLogin();
     }
     try {
-      const user = await api('/api/auth/me');
-      enterApp(user);
+      const result = await api('/api/bootstrap', { cache:false });
+      enterApp(result.user, result.dashboard, result.unread_count);
     } catch {
       showLogin();
     }
