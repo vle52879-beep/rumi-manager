@@ -4,7 +4,7 @@
    keeps all business rules on the Python/PostgreSQL backend. */
 
 window.RumiV5 = (() => {
-  const VERSION = '5.3';
+  const VERSION = '5.3.1';
   const pageNode = () => document.querySelector('#page');
   const localISO = (date) => {
     const d = new Date(date);
@@ -646,6 +646,7 @@ window.RumiV5 = (() => {
      Global command search
   ------------------------------------------------------------------ */
   async function openCommand() {
+    if (document.querySelector('#modal-root .modal-backdrop')) return;
     closeCommand();
     const root = document.createElement('div');
     root.id = 'v5-command-root';
@@ -673,10 +674,14 @@ window.RumiV5 = (() => {
       ...shiftRows.slice(0, 40).map((x) => ({ type:'Ca làm', title:state.user.role === 'admin' ? x.employee_name : x.location_name, sub:`${dateVN(x.shift_date)} · ${x.start_time}–${x.end_time}`, page:state.user.role === 'admin' ? 'schedule' : 'shifts', icon:'calendar' })),
     ];
     const draw = () => {
+      if (!root.isConnected) return;
+      const resultsNode = root.querySelector('#v5-command-results');
+      if (!resultsNode) return;
       const q = normalize(input.value);
       const filtered = entries.filter((x) => !q || normalize(`${x.type} ${x.title} ${x.sub}`).includes(q)).slice(0, 18);
-      document.querySelector('#v5-command-results').innerHTML = filtered.length ? filtered.map((x) => `<button class="v5-command-item" data-v5-command-page="${x.page}"><span>${icons[x.icon] || icons.search}</span><span><strong>${esc(x.title)}</strong><small>${esc(x.type)} · ${esc(x.sub)}</small></span></button>`).join('') : '<div class="v5-command-empty">Không tìm thấy kết quả phù hợp.</div>';
+      resultsNode.innerHTML = filtered.length ? filtered.map((x) => `<button class="v5-command-item" data-v5-command-page="${x.page}"><span>${icons[x.icon] || icons.search}</span><span><strong>${esc(x.title)}</strong><small>${esc(x.type)} · ${esc(x.sub)}</small></span></button>`).join('') : '<div class="v5-command-empty">Không tìm thấy kết quả phù hợp.</div>';
     };
+    if (!root.isConnected) return;
     input.addEventListener('input', draw);
     draw();
   }
@@ -806,10 +811,14 @@ window.RumiV5 = (() => {
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeCommand();
-    if (event.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) {
+    if (event.key === 'Escape') {
+      if (document.querySelector('#modal-root .modal-backdrop')) closeModal();
+      else closeCommand();
+      return;
+    }
+    if (event.key === '/' && !document.querySelector('#modal-root .modal-backdrop') && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) {
       event.preventDefault();
-      openCommand();
+      openCommand().catch((error) => toast(error.message || 'Không thể mở tìm kiếm', 'error'));
     }
   });
 

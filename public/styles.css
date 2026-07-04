@@ -55,3 +55,9 @@
 
 /* v4.2 authentication visibility */
 .role-chip{display:inline-flex;align-items:center;min-height:30px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--muted);white-space:nowrap}.role-chip.admin{color:#7a3d1f;background:#fff0df;border-color:#edc9a5}.role-chip.employee{color:#235f45;background:#e9f8ef;border-color:#bfe7cd}.auth-foot strong{letter-spacing:.06em}.auth-card:before{content:"LOGIN · ROLE ACCESS";display:block;margin-bottom:12px;color:var(--brand);font-size:10px;font-weight:900;letter-spacing:.16em}@media(max-width:900px){.role-chip{display:none}}
+
+
+/* Modal interaction fix 5.3.1 */
+body.modal-open{overflow:hidden}
+.modal-backdrop{touch-action:none}
+.modal{touch-action:auto}

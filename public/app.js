@@ -126,10 +126,22 @@ function toast(message, type = 'success') {
 }
 function loading() { $('#page').innerHTML = '<div class="loading-screen"><span class="loader"></span><p>Đang tải dữ liệu RUMI...</p><div class="loading-hint">Các trang vừa mở sẽ được lưu tạm để chuyển lại nhanh hơn.</div></div>'; }
 function openModal(title, subtitle, content, wide = false) {
-  $('#modal-root').innerHTML = `<div class="modal-backdrop" data-action="close-modal"><section class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" onclick="event.stopPropagation()"><header class="modal-head"><div><h3>${esc(title)}</h3><p>${esc(subtitle)}</p></div><button class="modal-close" data-action="close-modal">${icons.x}</button></header><div class="modal-body">${content}</div></section></div>`;
-  setTimeout(() => $('#modal-root input, #modal-root select')?.focus(), 50);
+  const modalRoot = $('#modal-root');
+  if (!modalRoot) return toast('Không thể mở hộp thoại. Vui lòng tải lại trang.', 'error');
+  if (typeof closeCommand === 'function') closeCommand();
+  modalRoot.innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header class="modal-head"><div><h3>${esc(title)}</h3><p>${esc(subtitle)}</p></div><button type="button" class="modal-close" data-action="close-modal" aria-label="Đóng">${icons.x}</button></header><div class="modal-body">${content}</div></section></div>`;
+  const backdrop = modalRoot.querySelector('[data-modal-backdrop]');
+  backdrop?.addEventListener('click', (event) => {
+    if (event.target === backdrop) closeModal();
+  });
+  document.body.classList.add('modal-open');
+  setTimeout(() => modalRoot.querySelector('input:not([type="hidden"]), select, textarea, button')?.focus(), 50);
 }
-function closeModal() { $('#modal-root').innerHTML = ''; }
+function closeModal() {
+  const modalRoot = $('#modal-root');
+  if (modalRoot) modalRoot.innerHTML = '';
+  document.body.classList.remove('modal-open');
+}
 
 function updateClock() {
   const now = new Date();
