@@ -3,33 +3,104 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#6f432f">
+  <meta name="theme-color" content="#4b2a1d">
   <meta name="robots" content="index,follow">
-  <meta name="description" content="RUMI Manager là phần mềm quản lý nhân viên quán trà sữa: phân ca, đăng ký lịch rảnh, chấm công GPS, bảng lương và quản lý kho nguyên liệu.">
+  <meta name="description" content="RUMI Manager là phần mềm quản lý nhân viên quán trà sữa: đăng ca, duyệt lịch, chấm công GPS, bảng lương theo giờ, bảo mật tài khoản và quản lý kho nguyên liệu.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="RUMI Manager — Quản lý nhân viên quán trà sữa">
-  <meta property="og:description" content="Phân ca, chấm công GPS, tính lương theo giờ và quản lý kho trên một hệ thống thống nhất.">
+  <meta property="og:title" content="RUMI Manager — Vận hành quán trà sữa nhẹ nhàng hơn">
+  <meta property="og:description" content="Đăng ca, duyệt lịch, chấm công GPS, tính lương và kiểm soát kho trên một hệ thống cao cấp, trực quan.">
   <title>RUMI Manager — Phần mềm quản lý nhân viên quán trà sữa</title>
-  <style>
-    :root{--brown:#6f432f;--deep:#342017;--cream:#fff8ed;--milk:#f7ead7;--green:#50745d;--line:rgba(111,67,47,.15);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--deep);background:var(--cream)}
-    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 15%,rgba(216,153,91,.24),transparent 28%),radial-gradient(circle at 85% 20%,rgba(80,116,93,.16),transparent 25%),linear-gradient(180deg,#fffaf2,#f5e6d1)}
-    a{text-decoration:none;color:inherit}.wrap{width:min(1120px,calc(100% - 32px));margin:auto}.nav{height:78px;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:12px;font-weight:900;letter-spacing:.12em}.logo{width:44px;height:44px;border-radius:15px;display:grid;place-items:center;background:var(--brown);color:#fff;box-shadow:0 12px 28px rgba(111,67,47,.25)}.logo svg{width:25px;fill:none;stroke:currentColor;stroke-width:1.8}.nav-actions{display:flex;gap:10px}.btn{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 20px;border-radius:14px;font-weight:800;border:1px solid var(--line);background:rgba(255,255,255,.7);backdrop-filter:blur(14px)}.btn.primary{background:var(--brown);color:#fff;border-color:var(--brown);box-shadow:0 14px 30px rgba(111,67,47,.25)}
-    .hero{display:grid;grid-template-columns:1.08fr .92fr;gap:52px;align-items:center;padding:68px 0 88px}.eyebrow{font-size:12px;font-weight:900;letter-spacing:.18em;color:var(--green)}h1{font-size:clamp(42px,6vw,76px);line-height:1.02;margin:18px 0 22px;letter-spacing:-.045em}.lead{font-size:19px;line-height:1.72;color:#6c5143;max-width:650px}.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:30px}.proof{display:flex;gap:22px;flex-wrap:wrap;margin-top:32px;color:#735a4c;font-size:14px}.proof strong{display:block;font-size:21px;color:var(--deep)}
-    .mock{position:relative;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.9);border-radius:30px;padding:18px;box-shadow:0 34px 70px rgba(86,50,31,.18);backdrop-filter:blur(20px);transform:rotate(1.2deg)}.screen{background:#fffaf3;border-radius:22px;padding:22px;min-height:470px}.top{display:flex;justify-content:space-between;align-items:center}.pill{font-size:11px;font-weight:900;padding:8px 11px;border-radius:999px;background:#edf4ef;color:var(--green)}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:13px;margin-top:18px}.card{border:1px solid var(--line);border-radius:17px;padding:16px;background:#fff}.card small{color:#8d7162}.card strong{font-size:26px;display:block;margin-top:8px}.shift{margin-top:16px;border-radius:17px;padding:16px;background:var(--milk)}.row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 0;border-bottom:1px dashed var(--line)}.row:last-child{border:0}.avatar{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:var(--brown);color:#fff;font-weight:900}.person{display:flex;align-items:center;gap:10px}.bubble{position:absolute;padding:12px 15px;border-radius:16px;background:#fff;box-shadow:0 16px 35px rgba(80,43,25,.14);font-weight:800}.b1{left:-25px;bottom:55px}.b2{right:-22px;top:70px}
-    .features{padding:82px 0}.section-title{text-align:center;max-width:720px;margin:0 auto 38px}.section-title h2{font-size:clamp(32px,4vw,48px);margin:12px 0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.feature{padding:26px;border-radius:23px;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.92);box-shadow:0 16px 38px rgba(87,51,31,.08)}.icon{width:46px;height:46px;border-radius:15px;background:var(--milk);display:grid;place-items:center;font-size:22px}.feature h3{margin:18px 0 8px}.feature p{margin:0;color:#775e50;line-height:1.65}.footer{padding:38px 0 54px;color:#846b5c;text-align:center;font-size:14px}
-    @media(max-width:850px){.hero{grid-template-columns:1fr;padding-top:35px}.mock{max-width:590px;margin:auto}.grid{grid-template-columns:1fr 1fr}.b1{left:8px}.b2{right:8px}}@media(max-width:560px){.nav{height:68px}.brand span{display:none}.hero{gap:34px}.cards,.grid{grid-template-columns:1fr}.mock{transform:none}.screen{min-height:auto}.bubble{display:none}.nav-actions .btn:first-child{display:none}}
-  </style>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"RUMI Manager","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Phần mềm quản lý nhân viên, phân ca, chấm công GPS, bảng lương và kho nguyên liệu cho quán trà sữa."}</script>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/landing-v6.css?v=6.0.0">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"RUMI Manager","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Phần mềm quản lý nhân viên, đăng ca, chấm công GPS, bảng lương, bảo mật tài khoản và kho nguyên liệu cho quán trà sữa."}</script>
 </head>
 <body>
-  <header class="wrap nav"><a class="brand" href="/gioi-thieu"><span class="logo"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 14H7L6 7ZM4 7h16M9 3h6M13 3l3-3"/><circle cx="10" cy="16" r="1"/><circle cx="14" cy="18" r="1"/></svg></span><span>RUMI MANAGER</span></a><div class="nav-actions"><a class="btn" href="#tinh-nang">Tính năng</a><a class="btn primary" href="/">Đăng nhập</a></div></header>
+  <div class="noise" aria-hidden="true"></div>
+  <div class="ambient" aria-hidden="true"><i></i><i></i><i></i></div>
+
+  <header class="nav-wrap">
+    <nav class="wrap nav">
+      <a class="brand" href="/gioi-thieu" aria-label="RUMI Manager">
+        <span class="logo"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 14H7L6 7ZM4 7h16M9 3h6M13 3l3-3"/><circle cx="10" cy="16" r="1"/><circle cx="14" cy="18" r="1"/></svg></span>
+        <span>RUMI MANAGER</span>
+      </a>
+      <div class="nav-links"><a href="#tinh-nang">Tính năng</a><a href="#quy-trinh">Quy trình</a><a href="#bao-mat">Bảo mật</a><a href="/huong-dan-rumi.pdf" target="_blank" rel="noopener">Hướng dẫn</a></div>
+      <div class="nav-actions"><a class="btn" href="/huong-dan-rumi.pdf" target="_blank" rel="noopener">Xem tài liệu</a><a class="btn primary" href="/">Đăng nhập <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
+    </nav>
+  </header>
+
   <main>
     <section class="wrap hero">
-      <div><span class="eyebrow">DÀNH CHO QUÁN TRÀ SỮA</span><h1>Quản lý ca làm,<br>lương và kho<br>trên một nơi.</h1><p class="lead">RUMI giúp chủ quán xếp lịch theo thời gian rảnh của nhân viên, chấm công đúng vị trí, tính lương theo giờ và kiểm soát nguyên liệu minh bạch.</p><div class="cta"><a class="btn primary" href="/">Mở hệ thống thử nghiệm</a><a class="btn" href="#tinh-nang">Xem tính năng</a></div><div class="proof"><div><strong>GPS</strong>Chấm công đúng cửa hàng</div><div><strong>Tự động</strong>Tính giờ và bảng lương</div><div><strong>Realtime</strong>Kho và danh sách cần mua</div></div></div>
-      <div class="mock"><div class="screen"><div class="top"><div><small>Xin chào, Quản lý</small><h3 style="margin:5px 0">Tổng quan hôm nay</h3></div><span class="pill">● TRỰC TUYẾN</span></div><div class="cards"><div class="card"><small>Nhân viên đi làm</small><strong>08</strong></div><div class="card"><small>Ca đang hoạt động</small><strong>03</strong></div><div class="card"><small>Giờ công tháng</small><strong>486h</strong></div><div class="card"><small>Cần nhập kho</small><strong>05</strong></div></div><div class="shift"><strong>Ca làm tiếp theo</strong><div class="row"><div class="person"><span class="avatar">A</span><span><b>An</b><br><small>Pha chế</small></span></div><b>17:00–22:00</b></div><div class="row"><div class="person"><span class="avatar">M</span><span><b>Mai</b><br><small>Thu ngân</small></span></div><b>17:00–22:00</b></div></div></div><span class="bubble b1">✓ Chấm công hợp lệ</span><span class="bubble b2">Kho đã tự trừ</span></div>
+      <div class="hero-copy reveal">
+        <span class="eyebrow">VẬN HÀNH QUÁN TRÀ SỮA THÔNG MINH</span>
+        <h1>Nhẹ nhàng quản lý,<br><span class="gradient-text">trọn vị mỗi ca làm.</span></h1>
+        <p class="lead">RUMI kết nối toàn bộ quy trình nhân sự: admin đăng ca, nhân viên đăng ký, duyệt lịch Full-time/Part-time, chấm công GPS, tính lương theo giờ và kiểm soát nguyên liệu minh bạch.</p>
+        <div class="hero-actions"><a class="btn primary" href="/">Mở hệ thống thử nghiệm <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a><a class="btn" href="#tinh-nang">Khám phá tính năng</a></div>
+        <div class="micro-proof">
+          <span class="proof-item"><i class="proof-icon"><svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg></i> Chấm công đúng cửa hàng</span>
+          <span class="proof-item"><i class="proof-icon"><svg viewBox="0 0 24 24"><path d="M6 2v4M18 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"/></svg></i> Lịch làm rõ ràng</span>
+          <span class="proof-item"><i class="proof-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 12h8"/></svg></i> Lương theo giờ minh bạch</span>
+        </div>
+      </div>
+
+      <div class="hero-stage reveal" aria-label="Minh họa giao diện RUMI">
+        <span class="orbital"></span>
+        <div class="mock-shell">
+          <div class="mock-screen">
+            <div class="mock-top"><span class="dots"><i></i><i></i><i></i></span><span class="live">DỮ LIỆU TRỰC TUYẾN</span></div>
+            <div class="mock-body">
+              <aside class="mock-side"><div class="mini-logo"></div><div class="mini-nav active"></div><div class="mini-nav"></div><div class="mini-nav"></div><div class="mini-nav"></div><div class="mini-nav"></div></aside>
+              <div class="mock-main">
+                <div class="mock-heading"><div><small>RUMI OPERATIONS</small><h3>Tổng quan hôm nay</h3></div><small>Thứ Hai, 06/07</small></div>
+                <div class="mock-stats"><div class="mock-stat"><small>ĐANG TRONG CA</small><strong>08</strong></div><div class="mock-stat"><small>ĐƠN CHỜ DUYỆT</small><strong>05</strong></div><div class="mock-stat"><small>KHO SẮP HẾT</small><strong>03</strong></div></div>
+                <div class="mock-grid">
+                  <div class="mock-card"><div class="mock-card-title"><span>CA LÀM HÔM NAY</span><span>12 ca</span></div><div class="shift-row"><span class="mini-avatar">AN</span><span class="shift-copy"><strong>Nguyễn An</strong><small>07:00–15:00 · Pha chế</small></span><span class="mini-badge">ĐANG LÀM</span></div><div class="shift-row"><span class="mini-avatar">VY</span><span class="shift-copy"><strong>Trần Vy</strong><small>12:00–20:00 · Thu ngân</small></span><span class="mini-badge">SẮP ĐẾN</span></div><div class="shift-row"><span class="mini-avatar">MINH</span><span class="shift-copy"><strong>Lê Minh</strong><small>17:00–22:00 · Phục vụ</small></span><span class="mini-badge">ĐÃ DUYỆT</span></div></div>
+                  <div class="mock-card"><div class="mock-card-title"><span>ĐÚNG GIỜ</span><span>Tuần này</span></div><div class="ring-chart"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <span class="floating-card fc1"><i class="ok">✓</i> Chấm công hợp lệ</span>
+        <span class="floating-card fc2"><i class="ok">↗</i> Ca đã chốt lịch</span>
+        <span class="floating-card fc3"><i class="ok">−</i> Kho tự động trừ</span>
+        <span class="cup-art"><i class="pearl p1"></i><i class="pearl p2"></i><i class="pearl p3"></i></span>
+      </div>
     </section>
-    <section id="tinh-nang" class="features"><div class="wrap"><div class="section-title"><span class="eyebrow">HỆ THỐNG ĐỒNG NHẤT</span><h2>Đủ công cụ để vận hành ca làm mỗi ngày</h2></div><div class="grid"><article class="feature"><div class="icon">🗓️</div><h3>Phân ca thông minh</h3><p>Nhân viên đăng ký lịch rảnh, quản lý duyệt và xếp ca, cảnh báo trùng lịch hoặc thiếu người.</p></article><article class="feature"><div class="icon">📍</div><h3>Chấm công GPS</h3><p>Chỉ chấm công trong bán kính cửa hàng và đúng khung thời gian trước, sau ca đã cấu hình.</p></article><article class="feature"><div class="icon">💰</div><h3>Lương theo giờ</h3><p>Tổng hợp giờ làm thực tế, tăng ca, thưởng, phạt, tạm ứng và trạng thái thanh toán.</p></article><article class="feature"><div class="icon">🧋</div><h3>Kho nguyên liệu</h3><p>Ghi nhận nguyên liệu đã lấy, tự trừ tồn kho và lưu lịch sử theo nhân viên, thời gian.</p></article><article class="feature"><div class="icon">🛒</div><h3>Danh sách cần mua</h3><p>Nhân viên gửi đề xuất; hệ thống cũng tự cảnh báo khi tồn kho xuống dưới mức tối thiểu.</p></article><article class="feature"><div class="icon">🔐</div><h3>Phân quyền rõ ràng</h3><p>Admin quản lý nhân viên, lịch, lương; nhân viên chỉ thấy và thao tác dữ liệu của mình.</p></article></div></div></section>
+
+    <section class="marquee" aria-label="Các tính năng nổi bật"><div class="marquee-track"><span>ĐĂNG CA & DUYỆT ĐƠN</span><span>FULL-TIME 6 NGÀY / TUẦN</span><span>CHẤM CÔNG GPS</span><span>BẢNG LƯƠNG THÁNG</span><span>XUẤT EXCEL LỊCH TUẦN</span><span>KHO TỰ ĐỘNG</span><span>BẢO MẬT TÀI KHOẢN</span><span>ĐĂNG CA & DUYỆT ĐƠN</span><span>FULL-TIME 6 NGÀY / TUẦN</span><span>CHẤM CÔNG GPS</span><span>BẢNG LƯƠNG THÁNG</span><span>XUẤT EXCEL LỊCH TUẦN</span><span>KHO TỰ ĐỘNG</span><span>BẢO MẬT TÀI KHOẢN</span></div></section>
+
+    <section id="tinh-nang" class="section">
+      <div class="wrap">
+        <header class="section-head reveal"><span class="eyebrow">MỘT HỆ THỐNG ĐỒNG NHẤT</span><h2>Không chỉ đẹp — mọi luồng vận hành đều rõ ràng.</h2><p>Từ lúc mở ca đăng ký đến lúc xuất bảng lương, dữ liệu được nối liền và kiểm tra theo đúng vai trò.</p></header>
+        <div class="bento">
+          <article class="bento-card big dark reveal"><span class="feature-icon"><svg viewBox="0 0 24 24"><path d="M6 2v4M18 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"/></svg></span><h3>Đăng ca, nhận đơn và chốt lịch</h3><p>Admin công bố ca cần người. Nhân viên đăng ký. Hệ thống kiểm tra trùng lịch, giới hạn giờ và ngày nghỉ; admin duyệt, đưa vào danh sách chờ hoặc từ chối.</p><span class="bento-visual"></span></article>
+          <article class="bento-card medium reveal"><span class="feature-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87"/></svg></span><h3>Full-time và Part-time đúng cách</h3><p>Full-time được bảo đảm ít nhất một ngày nghỉ mỗi tuần. Part-time chủ động đăng ký ca còn thiếu. Hệ thống cảnh báo quá giờ hoặc làm quá nhiều ngày liên tiếp.</p></article>
+          <article class="bento-card third reveal"><span class="feature-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2V0M12 24v-2M2 12H0M24 12h-2"/></svg></span><h3>Chấm công GPS nhiều lớp</h3><p>Kiểm tra vị trí, sai số, thời gian, ca hợp lệ và rủi ro thiết bị trước khi ghi nhận.</p></article>
+          <article class="bento-card third reveal"><span class="feature-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h.01M17 9h.01M8 12h8"/></svg></span><h3>Bảng lương tháng</h3><p>Giờ hợp lệ, tăng ca đã duyệt, thưởng, phạt và tạm ứng được tổng hợp minh bạch.</p></article>
+          <article class="bento-card third reveal"><span class="feature-icon"><svg viewBox="0 0 24 24"><path d="m21 8-9-5-9 5 9 5 9-5ZM3 8v8l9 5 9-5V8M12 13v8"/></svg></span><h3>Kho & cần mua</h3><p>Nhân viên ghi nhận nguyên liệu lấy ra, hệ thống tự trừ tồn và cảnh báo khi xuống định mức.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="quy-trinh" class="section">
+      <div class="wrap">
+        <header class="section-head reveal"><span class="eyebrow">QUY TRÌNH ĐƠN GIẢN</span><h2>Bốn bước để có một tuần làm việc rõ ràng.</h2><p>RUMI biến một quy trình dễ rối thành các trạng thái dễ theo dõi và dễ kiểm soát.</p></header>
+        <div class="steps"><article class="step reveal"><span class="step-num">01</span><h3>Admin đăng nhu cầu ca</h3><p>Chọn ngày, giờ, cửa hàng, vị trí và số nhân viên cần.</p></article><article class="step reveal"><span class="step-num">02</span><h3>Nhân viên đăng ký</h3><p>Nhân viên thấy ca phù hợp và gửi đơn ngay trên điện thoại.</p></article><article class="step reveal"><span class="step-num">03</span><h3>Duyệt và giữ dự phòng</h3><p>Admin duyệt đủ người, đưa ứng viên dư vào danh sách chờ.</p></article><article class="step reveal"><span class="step-num">04</span><h3>Chốt lịch và tính lương</h3><p>Chỉ ca đã chốt mới được chấm công và đi vào bảng lương.</p></article></div>
+      </div>
+    </section>
+
+    <section id="bao-mat" class="security">
+      <div class="wrap security-grid">
+        <div class="shield reveal" aria-hidden="true"><span class="shield-ring"></span><span class="shield-body"></span><span class="shield-lock"></span></div>
+        <div class="reveal"><span class="eyebrow" style="color:#a9d2b0">BẢO MẬT CHUYÊN NGHIỆP</span><h2>Tài khoản nhân viên không còn là một mật khẩu dùng chung.</h2><p>Mỗi nhân viên có tài khoản riêng, mật khẩu tạm bắt buộc đổi, khóa đăng nhập sai, phiên thiết bị có thể thu hồi và toàn bộ thao tác quan trọng được lưu lịch sử.</p><div class="security-list"><div class="security-item"><strong>Mật khẩu mạnh</strong><span>Không dùng lại mật khẩu cũ và chặn mật khẩu quá phổ biến.</span></div><div class="security-item"><strong>Khóa đăng nhập sai</strong><span>Tự khóa tạm khi có nhiều lần thử không thành công.</span></div><div class="security-item"><strong>Quản lý thiết bị</strong><span>Thu hồi từng phiên hoặc đăng xuất tất cả thiết bị.</span></div><div class="security-item"><strong>Backend phân quyền</strong><span>Không chỉ ẩn nút — API vẫn kiểm tra đúng vai trò.</span></div></div></div>
+      </div>
+    </section>
+
+    <section class="cta-section"><div class="wrap"><div class="cta-box reveal"><div><h2>Sẵn sàng trải nghiệm RUMI?</h2><p>Mở hệ thống thử nghiệm hoặc xem tài liệu hướng dẫn đầy đủ trước khi sử dụng.</p></div><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center"><a class="btn" href="/huong-dan-rumi.pdf" target="_blank" rel="noopener">Xem hướng dẫn</a><a class="btn" href="/">Đăng nhập ngay <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div></div></div></section>
   </main>
-  <footer class="wrap footer">RUMI Manager · Phiên bản thử nghiệm trực tuyến</footer>
+
+  <footer class="footer"><div class="wrap footer-row"><a class="brand" href="/gioi-thieu"><span class="logo"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 14H7L6 7ZM4 7h16M9 3h6M13 3l3-3"/></svg></span><span>RUMI MANAGER</span></a><span class="footer-copy">RUMI 6.0 Premium Motion UI · Dữ liệu RUMI tách riêng bằng bảng rumi_*</span></div></footer>
+  <script src="/landing-v6.js?v=6.0.0" defer></script>
 </body>
 </html>

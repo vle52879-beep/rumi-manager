@@ -1,18 +1,21 @@
-# Deploy RUMI 5.5 lên Vercel
+# Deploy RUMI 6.0 lên Vercel
 
-Sau khi chạy SQL v5.5 trên Supabase, chép mã vào repository đang kết nối Vercel:
+Bản 6.0 giữ nguyên cấu hình Vercel và Supabase của bản đang chạy.
 
 ```bash
+cd ~/Downloads
+unzip -o RUMI-Manager-Supabase-v6.0-PREMIUM-UI.zip
+
 rsync -av --delete \
   --exclude='.git' \
   --exclude='.env' \
-  RUMI-Manager-Supabase-v5.5-SECURITY-ATTENDANCE/ \
+  RUMI-Manager-Supabase-v6.0-PREMIUM-UI/ \
   RUMI-Manager-Supabase-v4.4-Vercel/
 
-cd RUMI-Manager-Supabase-v4.4-Vercel
+cd ~/Downloads/RUMI-Manager-Supabase-v4.4-Vercel
 git add -A
-git commit -m "Upgrade RUMI 5.5 security and smart attendance"
+git commit -m "Upgrade RUMI 6.0 premium motion UI"
 git push
 ```
 
-Chờ Vercel báo `Ready`, sau đó tải cứng bằng `Command + Shift + R`.
+Không chạy SQL mới. Chờ Vercel `Ready`, sau đó tải lại bằng `Command + Shift + R`.

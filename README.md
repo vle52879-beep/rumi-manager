@@ -1,30 +1,33 @@
-# RUMI Manager 5.5 — Security & Smart Attendance
+# RUMI Manager 6.0 — Premium Motion UI
 
-Bản nâng cấp bảo mật tài khoản và chấm công logic cho RUMI Manager. Hệ thống vẫn dùng chung Supabase của IC3 Smart Class nhưng chỉ tạo/sửa bảng và hàm có tiền tố `rumi_`.
+Bản quản lý nhân viên quán trà sữa chạy trên Vercel + Supabase, gồm đăng nhập/phân quyền, đăng ca và duyệt đơn, lịch Full-time/Part-time, chấm công GPS, bảng công, bảng lương tháng, xuất Excel, kho nguyên liệu và bảo mật tài khoản.
 
-## Bảo mật tài khoản
+## Điểm mới của 6.0
 
-- Mật khẩu PBKDF2-HMAC-SHA256 600.000 vòng, salt riêng và pepper phía backend tùy chọn.
-- Nhân viên dùng mật khẩu tạm do admin cấp và bắt buộc đổi ở lần đăng nhập đầu.
-- Kiểm tra độ mạnh, chặn mật khẩu phổ biến, tên đăng nhập và 5 mật khẩu gần nhất.
-- Khóa đăng nhập 15 phút sau 5 lần sai; 60 phút sau 10 lần sai.
-- Phiên đăng nhập ngẫu nhiên lưu dạng hash trong CSDL, cookie `HttpOnly`, `Secure`, `SameSite=Strict`.
-- Tự hết phiên sau 2 giờ không hoạt động hoặc 12 giờ tuyệt đối.
-- Trang quản lý thiết bị đăng nhập, thu hồi từng thiết bị hoặc đăng xuất tất cả.
-- Đổi/reset mật khẩu sẽ thu hồi các phiên cũ.
-- CSRF/origin protection, CSP, HSTS và các security header.
+- Giao diện premium màu caramel – kem sữa – matcha.
+- Motion design trên login, dashboard, card, nút, lịch, bảng, modal và toast.
+- Trang giới thiệu công khai mới để giới thiệu sản phẩm với khách hàng.
+- Loading progress, trạng thái mạng, hiện/ẩn mật khẩu, counter animation và micro-interaction.
+- Responsive tốt trên máy tính và điện thoại.
+- Không thêm thư viện frontend bên ngoài, không cần `npm install`.
+- Giữ nguyên cơ sở dữ liệu 5.5, không cần chạy migration SQL.
 
-## Chấm công thông minh
+## Chạy local
 
-- Lấy nhiều mẫu GPS và chọn mẫu có sai số tốt nhất.
-- GPS phải mới, đủ chính xác, đúng bán kính cửa hàng và đúng khung giờ ca.
-- Giờ máy chủ là nguồn thời gian chuẩn; đổi giờ trên điện thoại không ảnh hưởng.
-- Phát hiện thiết bị vừa chấm công cho nhiều tài khoản và đánh dấu rủi ro.
-- Vào sớm không cộng thêm lương; đi trễ/về sớm tính theo phút thực tế.
-- Phút sau giờ kết thúc là tăng ca chờ admin duyệt, chưa duyệt không cộng lương.
-- Nhân viên gửi yêu cầu sửa chấm công; admin duyệt hoặc từ chối.
-- Bảng công, bảng lương tháng và xuất Excel tiếp tục dùng `payable_hours` đã duyệt.
+Tạo `.env` theo `.env.example`, sau đó:
 
-## Nâng cấp
+```bash
+python3 server.py
+```
 
-Đọc [UPGRADE_V55.md](UPGRADE_V55.md).
+Mở `http://localhost:8000`.
+
+## Deploy Vercel
+
+Xem [UPGRADE_V60.md](UPGRADE_V60.md) hoặc [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md).
+
+## Bảo mật
+
+- Chỉ đặt Secret/service-role key trong Vercel Environment Variables hoặc `.env` phía server.
+- Không đưa Secret key vào frontend, GitHub hoặc biến `VITE_*`.
+- Không gửi mật khẩu và khóa bí mật qua ảnh chụp màn hình.
