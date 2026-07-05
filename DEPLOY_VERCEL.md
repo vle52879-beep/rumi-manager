@@ -1,10 +1,10 @@
-# Deploy RUMI 6.1 lên Vercel
+# Deploy RUMI 6.2 lên Vercel
 
 ## 1. Chạy migration
 
 ```bash
-cd ~/Downloads/RUMI-Manager-Supabase-v6.1-PAYROLL-LOGIC
-pbcopy < sql/SUPABASE_RUMI_V6_1_PAYROLL_LOGIC.sql
+cd ~/Downloads/RUMI-Manager-Supabase-v6.2-ATTENDANCE-PDF
+pbcopy < sql/SUPABASE_RUMI_V6_2_ATTENDANCE_ALERTS.sql
 ```
 
 Mở Supabase → SQL Editor → New query → dán → Run.
@@ -17,22 +17,28 @@ cd ~/Downloads
 rsync -av --delete \
   --exclude='.git' \
   --exclude='.env' \
-  RUMI-Manager-Supabase-v6.1-PAYROLL-LOGIC/ \
+  RUMI-Manager-Supabase-v6.2-ATTENDANCE-PDF/ \
   RUMI-Manager-Supabase-v4.4-Vercel/
 
 cd ~/Downloads/RUMI-Manager-Supabase-v4.4-Vercel
 
 git add -A
-git commit -m "Fix RUMI 6.1 payroll and schedule logic"
+git commit -m "Upgrade RUMI 6.2 attendance alerts and payroll PDF"
 git push
 ```
 
-Chờ Vercel báo Ready rồi nhấn `Command + Shift + R`.
+Chờ Vercel báo **Ready** rồi nhấn `Command + Shift + R`.
 
-Kiểm tra:
+## 3. Kiểm tra
 
 ```text
 https://rumi-manager-test.vercel.app/api/health
 ```
 
-Kết quả cần có `"version":"6.1.0"` và `"payroll_logic_v2":true`.
+Kết quả cần có `"version":"6.2.0"`, `"attendance_alerts":true` và `"payroll_pdf":true`.
+
+## 4. Xuất PDF lương
+
+- Admin: **Bảng lương → Xuất PDF bảng lương**.
+- Từng nhân viên: **Phiếu lương → Xuất PDF phiếu lương**.
+- Trong hộp thoại in của trình duyệt, chọn **Save as PDF / Lưu dưới dạng PDF**.

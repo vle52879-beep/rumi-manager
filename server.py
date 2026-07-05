@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RUMI Manager v6.1 PAYROLL LOGIC — fixed admin account, employee CRUD, roles, scheduling and GPS.
+"""RUMI Manager v6.2 ATTENDANCE ALERTS & PDF — fixed admin account, employee CRUD, roles, scheduling and GPS.
 
 Python standard library only. The Supabase secret key stays in this backend and
 is never sent to the browser. Every database object used by this app starts
@@ -69,6 +69,7 @@ class TTLCache:
 
 USER_CACHE = TTLCache()
 PAYROLL_CACHE = TTLCache()
+ATTENDANCE_ALERT_CACHE = TTLCache()
 
 
 def parallel_calls(**jobs):
@@ -117,6 +118,7 @@ TABLES = {
     "login_throttles": "rumi_login_throttles",
     "attendance_events": "rumi_attendance_events",
     "attendance_corrections": "rumi_attendance_correction_requests",
+    "attendance_alerts": "rumi_shift_attendance_alerts",
 }
 
 
@@ -228,6 +230,58 @@ def time_minutes(value: str) -> int:
 
 def overlaps(start_a: str, end_a: str, start_b: str, end_b: str) -> bool:
     return time_minutes(start_a) < time_minutes(end_b) and time_minutes(end_a) > time_minutes(start_b)
+
+
+def shift_local_datetimes(shift: dict) -> tuple[datetime, datetime]:
+    day = datetime.strptime(str(shift.get("shift_date"))[:10], "%Y-%m-%d").date()
+    start_value = datetime.strptime(str(shift.get("start_time"))[:5], "%H:%M").time()
+    end_value = datetime.strptime(str(shift.get("end_time"))[:5], "%H:%M").time()
+    return datetime.combine(day, start_value, tzinfo=LOCAL_TZ), datetime.combine(day, end_value, tzinfo=LOCAL_TZ)
+
+
+def classify_shift_attendance(shift: dict, attendance: dict | None, settings: dict | None = None, now: datetime | None = None) -> dict:
+    """Return the live attendance state for one official shift.
+
+    The state is calculated from server/store time, never from the employee's
+    device clock. It is also used by payroll, dashboard alerts and synthetic
+    attendance rows so every screen follows the same rules.
+    """
+    settings = settings or {}
+    now = now or local_now()
+    start_dt, end_dt = shift_local_datetimes(shift)
+    checkin_before = integer(settings.get("checkin_before_minutes"), 15)
+    checkin_after = integer(settings.get("checkin_after_minutes"), 5)
+    warning_after = max(integer(settings.get("attendance_warning_minutes"), 15), checkin_after)
+    no_show_after = max(integer(settings.get("attendance_no_show_minutes"), 30), warning_after)
+    absent_after_end = integer(settings.get("attendance_absent_after_end_minutes"), 0)
+    checkout_before = integer(settings.get("checkout_before_minutes"), 5)
+    checkout_after = integer(settings.get("checkout_after_minutes"), 180)
+
+    att = attendance or {}
+    has_in = bool(att.get("check_in") or att.get("check_in_at"))
+    has_out = bool(att.get("check_out") or att.get("check_out_at"))
+    minutes_from_start = max(0, int((now - start_dt).total_seconds() // 60)) if now >= start_dt else 0
+
+    if has_in and has_out:
+        return {"status": "Hoàn tất", "severity": "success", "minutes_late": integer(att.get("late_minutes")), "requires_action": False}
+    if has_in:
+        if now < end_dt - timedelta(minutes=checkout_before):
+            return {"status": "Đang làm", "severity": "success", "minutes_late": integer(att.get("late_minutes")), "requires_action": False}
+        if now <= end_dt + timedelta(minutes=checkout_after):
+            return {"status": "Đến giờ chấm ra", "severity": "warning", "minutes_late": integer(att.get("late_minutes")), "requires_action": True}
+        return {"status": "Thiếu giờ ra", "severity": "danger", "minutes_late": integer(att.get("late_minutes")), "requires_action": True}
+
+    if now < start_dt - timedelta(minutes=checkin_before):
+        return {"status": "Chưa đến ca", "severity": "neutral", "minutes_late": 0, "requires_action": False}
+    if now < start_dt:
+        return {"status": "Có thể chấm vào", "severity": "info", "minutes_late": 0, "requires_action": False}
+    if now <= start_dt + timedelta(minutes=checkin_after):
+        return {"status": "Đến giờ chấm công", "severity": "info", "minutes_late": minutes_from_start, "requires_action": True}
+    if now < start_dt + timedelta(minutes=no_show_after):
+        return {"status": "Đi trễ chưa chấm", "severity": "warning", "minutes_late": minutes_from_start, "requires_action": True}
+    if now < end_dt + timedelta(minutes=absent_after_end):
+        return {"status": "Nguy cơ vắng ca", "severity": "danger", "minutes_late": minutes_from_start, "requires_action": True}
+    return {"status": "Vắng ca", "severity": "danger", "minutes_late": minutes_from_start, "requires_action": True}
 
 
 def calculate_hours(check_in: str, check_out: str | None) -> float:
@@ -400,6 +454,8 @@ class SupabaseREST:
         text = str(message or "Lỗi cơ sở dữ liệu")
         lowered = text.lower()
         if code == "42P01" or "could not find the table" in lowered or ("relation" in lowered and "does not exist" in lowered):
+            if "shift_attendance_alerts" in lowered or "attendance_warning_minutes" in lowered:
+                return "Chưa nâng cấp RUMI v6.2. Hãy chạy sql/SUPABASE_RUMI_V6_2_ATTENDANCE_ALERTS.sql trong Supabase."
             if any(name in lowered for name in ("auth_sessions", "password_history", "login_throttles", "attendance_events", "attendance_correction")):
                 return "Chưa nâng cấp RUMI v5.5. Hãy chạy sql/SUPABASE_RUMI_V5_5_SECURITY_ATTENDANCE.sql trong Supabase."
             if "shift_openings" in lowered or "shift_applications" in lowered or "weekly_day_off" in lowered:
@@ -1006,6 +1062,122 @@ class RumiHandler(BaseHTTPRequestHandler):
             "link": link,
         })
 
+    def sync_attendance_alerts(self, user: dict) -> list[dict]:
+        """Synchronize live no-check-in / no-check-out alerts for current shifts."""
+        role = str(user.get("role") or "")
+        employee_id = integer(user.get("employee_id"))
+        cache_key = ("attendance-alerts", role, employee_id, local_now().strftime("%Y-%m-%d-%H-%M"))
+        cached = ATTENDANCE_ALERT_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        today = local_now().date()
+        start_day = (today - timedelta(days=1)).isoformat()
+        end_day = today.isoformat()
+        shift_filters = {
+            "shift_date": f"gte.{start_day}",
+            "and": f"(shift_date.lte.{end_day})",
+            "status": "in.(Đã xếp,Đã xác nhận)",
+        }
+        if role == "employee":
+            shift_filters["employee_id"] = f"eq.{employee_id}"
+        base = parallel_calls(
+            shifts=lambda: SB.select(TABLES["shifts"], filters=shift_filters, order="shift_date.asc,start_time.asc",
+                                     columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"),
+            settings=lambda: SB.select(TABLES["settings"], filters={"id": "eq.1"}, limit=1),
+        )
+        shifts = base["shifts"]
+        if not shifts:
+            ATTENDANCE_ALERT_CACHE.set(cache_key, [], 30)
+            return []
+        shift_ids = [x.get("id") for x in shifts]
+        related = parallel_calls(
+            attendance=lambda: SB.select_in(TABLES["attendance"], "shift_id", shift_ids),
+            alerts=lambda: SB.select_in(TABLES["attendance_alerts"], "shift_id", shift_ids),
+            employees=lambda: SB.select_in(TABLES["employees"], "id", [x.get("employee_id") for x in shifts], columns="id,code,name,role"),
+            locations=lambda: SB.select_in(TABLES["locations"], "id", [x.get("location_id") for x in shifts], columns="id,name,address"),
+        )
+        settings = base["settings"][0] if base["settings"] else {}
+        attendance_map = {integer(x.get("shift_id")): x for x in related["attendance"]}
+        alert_map = {integer(x.get("shift_id")): x for x in related["alerts"]}
+        employees = employee_map(related["employees"])
+        locations = location_map(related["locations"])
+        output = []
+        alert_statuses = {"Đến giờ chấm công", "Đi trễ chưa chấm", "Nguy cơ vắng ca", "Vắng ca", "Đến giờ chấm ra", "Thiếu giờ ra"}
+
+        for shift in shifts:
+            shift_id = integer(shift.get("id"))
+            eid = integer(shift.get("employee_id"))
+            current = classify_shift_attendance(shift, attendance_map.get(shift_id), settings)
+            existing = alert_map.get(shift_id)
+            status = current["status"]
+            if status not in alert_statuses:
+                if existing and not existing.get("resolved_at"):
+                    SB.update(TABLES["attendance_alerts"], {
+                        "resolved_at": now_iso(),
+                        "resolution_note": f"Tự đóng khi trạng thái chuyển thành {status}",
+                        "last_detected_at": now_iso(),
+                    }, {"id": f"eq.{existing['id']}"})
+                continue
+
+            same_resolved = bool(existing and existing.get("resolved_at") and existing.get("status") == status)
+            payload = {
+                "shift_id": shift_id,
+                "employee_id": eid,
+                "status": status,
+                "severity": current["severity"],
+                "minutes_late": current["minutes_late"],
+                "first_detected_at": (existing or {}).get("first_detected_at") or now_iso(),
+                "last_detected_at": now_iso(),
+                "resolved_at": (existing or {}).get("resolved_at") if same_resolved else None,
+                "resolution_note": (existing or {}).get("resolution_note", "") if same_resolved else "",
+                "notified_employee_at": (existing or {}).get("notified_employee_at"),
+                "notified_admin_at": (existing or {}).get("notified_admin_at"),
+            }
+            saved = SB.upsert(TABLES["attendance_alerts"], payload, "shift_id")
+            employee = employees.get(eid, {})
+            location = locations.get(integer(shift.get("location_id")), {})
+            time_text = f"{str(shift.get('start_time'))[:5]}-{str(shift.get('end_time'))[:5]}"
+            employee_name = employee.get("name") or f"NV #{eid}"
+            location_name = location.get("name") or "RUMI"
+            status_changed = not existing or existing.get("status") != status
+
+            if not same_resolved and (status_changed or not saved.get("notified_employee_at")):
+                employee_messages = {
+                    "Đến giờ chấm công": f"Ca {time_text} tại {location_name} đã đến giờ. Hãy chấm công vào.",
+                    "Đi trễ chưa chấm": f"Bạn đã trễ {current['minutes_late']} phút cho ca {time_text}. Hãy chấm công ngay hoặc báo quản lý.",
+                    "Nguy cơ vắng ca": f"Ca {time_text} chưa có chấm công vào và đang được cảnh báo nguy cơ vắng.",
+                    "Vắng ca": f"Ca {time_text} đã kết thúc nhưng không có chấm công vào. Trạng thái tạm ghi nhận: Vắng ca.",
+                    "Đến giờ chấm ra": f"Ca {time_text} đã gần/kết thúc. Hãy chấm công ra trước khi rời cửa hàng.",
+                    "Thiếu giờ ra": f"Ca {time_text} chưa có chấm công ra. Hãy gửi yêu cầu sửa công nếu bạn đã rời ca.",
+                }
+                self.notify_employee(eid, status, employee_messages[status], "warning" if current["severity"] != "danger" else "danger", "attendance")
+                SB.update(TABLES["attendance_alerts"], {"notified_employee_at": now_iso()}, {"id": f"eq.{saved['id']}"})
+                saved["notified_employee_at"] = now_iso()
+
+            admin_needed = status in {"Đi trễ chưa chấm", "Nguy cơ vắng ca", "Vắng ca", "Thiếu giờ ra"}
+            if not same_resolved and admin_needed and (status_changed or not saved.get("notified_admin_at")):
+                self.notify_role("admin", f"{status}: {employee_name}", f"Ca {time_text} tại {location_name}. Trễ {current['minutes_late']} phút.", "danger" if current["severity"] == "danger" else "warning", "attendance")
+                SB.update(TABLES["attendance_alerts"], {"notified_admin_at": now_iso()}, {"id": f"eq.{saved['id']}"})
+                saved["notified_admin_at"] = now_iso()
+
+            if same_resolved:
+                continue
+            saved.update({
+                "employee_name": employee_name,
+                "employee_code": employee.get("code"),
+                "employee_role": employee.get("role"),
+                "location_name": location_name,
+                "location_address": location.get("address"),
+                "shift": dict(shift),
+            })
+            output.append(saved)
+
+        severity_order = {"danger": 0, "warning": 1, "info": 2}
+        output.sort(key=lambda x: (severity_order.get(x.get("severity"), 9), str(x.get("shift", {}).get("start_time") or "")))
+        ATTENDANCE_ALERT_CACHE.set(cache_key, output, 30)
+        return output
+
     def enriched_shifts(self, shifts: list[dict], *, employees=None, locations=None, attendance=None) -> list[dict]:
         if not shifts:
             return []
@@ -1318,7 +1490,7 @@ class RumiHandler(BaseHTTPRequestHandler):
         self.notify_employee(integer(employee["id"]), "Đăng ký ca đã được duyệt", f"Ca {opening['work_date']} {str(opening['start_time'])[:5]}–{str(opening['end_time'])[:5]} đã được xếp.", "schedule", "shifts")
         return updated
 
-    def payroll_from_rows(self, employees, attendance, adjustments, payments, shifts=None) -> list[dict]:
+    def payroll_from_rows(self, employees, attendance, adjustments, payments, shifts=None, settings=None) -> list[dict]:
         """Build monthly payroll with schedule, attendance and payable time separated.
 
         Official shifts come from rumi_shifts instead of attendance. A future or
@@ -1326,6 +1498,7 @@ class RumiHandler(BaseHTTPRequestHandler):
         incorrectly appearing as "0 ca · 0 giờ".
         """
         shifts = shifts or []
+        settings = settings or {}
         now_local = local_now()
         today_local = now_local.date()
 
@@ -1342,6 +1515,9 @@ class RumiHandler(BaseHTTPRequestHandler):
             "upcoming_shift_count": 0,
             "active_shift_count": 0,
             "pending_checkin_count": 0,
+            "late_unclocked_count": 0,
+            "no_show_risk_count": 0,
+            "absent_shift_count": 0,
             "missing_attendance_count": 0,
             "incomplete_attendance_count": 0,
         })
@@ -1385,18 +1561,22 @@ class RumiHandler(BaseHTTPRequestHandler):
             has_in = bool(att and (att.get("check_in") or att.get("check_in_at")))
             has_out = bool(att and (att.get("check_out") or att.get("check_out_at")))
 
-            if start_dt > now_local:
+            live = classify_shift_attendance(shift, att, settings, now_local)
+            live_status = live.get("status")
+            if live_status in {"Chưa đến ca", "Có thể chấm vào"}:
                 bucket["upcoming_shift_count"] += 1
-            elif start_dt <= now_local < end_dt:
-                if has_out:
-                    pass
-                elif has_in:
-                    bucket["active_shift_count"] += 1
-                else:
-                    bucket["pending_checkin_count"] += 1
-            elif not has_in:
+            elif live_status == "Đến giờ chấm công":
+                bucket["pending_checkin_count"] += 1
+            elif live_status == "Đi trễ chưa chấm":
+                bucket["late_unclocked_count"] += 1
+            elif live_status == "Nguy cơ vắng ca":
+                bucket["no_show_risk_count"] += 1
+            elif live_status == "Vắng ca":
+                bucket["absent_shift_count"] += 1
                 bucket["missing_attendance_count"] += 1
-            elif not has_out:
+            elif live_status in {"Đang làm", "Đến giờ chấm ra"}:
+                bucket["active_shift_count"] += 1
+            elif live_status == "Thiếu giờ ra":
                 bucket["incomplete_attendance_count"] += 1
 
         for row in attendance:
@@ -1452,14 +1632,20 @@ class RumiHandler(BaseHTTPRequestHandler):
                 t["missing_attendance_count"]
                 + t["incomplete_attendance_count"]
                 + t["pending_checkin_count"]
+                + t["late_unclocked_count"]
+                + t["no_show_risk_count"]
                 + t["active_shift_count"]
                 + t["upcoming_shift_count"]
             )
 
             if t["incomplete_attendance_count"]:
                 payroll_state = "Thiếu giờ ra"
-            elif t["missing_attendance_count"]:
-                payroll_state = "Thiếu chấm công"
+            elif t["absent_shift_count"]:
+                payroll_state = "Vắng ca"
+            elif t["no_show_risk_count"]:
+                payroll_state = "Nguy cơ vắng ca"
+            elif t["late_unclocked_count"]:
+                payroll_state = "Đi trễ chưa chấm"
             elif t["pending_checkin_count"]:
                 payroll_state = "Đến giờ chấm công"
             elif t["active_shift_count"]:
@@ -1494,6 +1680,9 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "upcoming_shift_count": t["upcoming_shift_count"],
                 "active_shift_count": t["active_shift_count"],
                 "pending_checkin_count": t["pending_checkin_count"],
+                "late_unclocked_count": t["late_unclocked_count"],
+                "no_show_risk_count": t["no_show_risk_count"],
+                "absent_shift_count": t["absent_shift_count"],
                 "missing_attendance_count": t["missing_attendance_count"],
                 "incomplete_attendance_count": t["incomplete_attendance_count"],
                 "payroll_state": payroll_state,
@@ -1565,6 +1754,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 filters=payment_filters,
                 columns="employee_id,status,paid_at,month",
             ),
+            settings=lambda: SB.select(TABLES["settings"], filters={"id": "eq.1"}, limit=1),
         )
         relevant_ids = {
             integer(x.get("employee_id"))
@@ -1587,6 +1777,7 @@ class RumiHandler(BaseHTTPRequestHandler):
             data["adjustments"],
             data["payments"],
             data["shifts"],
+            data["settings"][0] if data["settings"] else {},
         )
         PAYROLL_CACHE.set(cache_key, rows, 20)
         return rows
@@ -1622,6 +1813,9 @@ class RumiHandler(BaseHTTPRequestHandler):
                 row["upcoming_shift_count"] = integer(row.get("upcoming_shift_count"))
                 row["active_shift_count"] = integer(row.get("active_shift_count"))
                 row["pending_checkin_count"] = integer(row.get("pending_checkin_count"))
+                row["late_unclocked_count"] = integer(row.get("late_unclocked_count"))
+                row["no_show_risk_count"] = integer(row.get("no_show_risk_count"))
+                row["absent_shift_count"] = integer(row.get("absent_shift_count"))
                 row["missing_attendance_count"] = integer(row.get("missing_attendance_count"))
                 row["incomplete_attendance_count"] = integer(row.get("incomplete_attendance_count"))
                 row["payroll_state"] = row.get("payroll_state") or ("Đủ dữ liệu" if num(row.get("payable_hours")) > 0 else "Chưa có công")
@@ -1656,6 +1850,9 @@ class RumiHandler(BaseHTTPRequestHandler):
             "upcoming_shift_count": x.get("upcoming_shift_count", 0),
             "active_shift_count": x.get("active_shift_count", 0),
             "pending_checkin_count": x.get("pending_checkin_count", 0),
+            "late_unclocked_count": x.get("late_unclocked_count", 0),
+            "no_show_risk_count": x.get("no_show_risk_count", 0),
+            "absent_shift_count": x.get("absent_shift_count", 0),
             "missing_attendance_count": x.get("missing_attendance_count", 0),
             "incomplete_attendance_count": x.get("incomplete_attendance_count", 0),
             "payroll_state": x.get("payroll_state", "Chưa có dữ liệu"),
@@ -1676,6 +1873,7 @@ class RumiHandler(BaseHTTPRequestHandler):
         today = today_text()
         month = current_month()
         month_start, month_end = month_bounds(month)
+        attendance_alerts = self.sync_attendance_alerts(user)
         if role == "admin":
             data = parallel_calls(
                 employees=lambda: SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"},
@@ -1714,7 +1912,10 @@ class RumiHandler(BaseHTTPRequestHandler):
                     "low_stock": len([x for x in data["inventory"] if num(x.get("quantity")) <= num(x.get("min_stock"))]),
                     "pending_purchase": len(data["purchases"]),
                     "payroll_total": sum(num(x.get("total")) for x in payroll),
+                    "attendance_alerts": len(attendance_alerts),
+                    "attendance_danger": len([x for x in attendance_alerts if x.get("severity") == "danger"]),
                 },
+                "attendance_alerts": attendance_alerts[:10],
                 "today_shifts": shifts_today,
                 "notifications": notifications[:6],
                 "unread_count": len([x for x in notifications if not x.get("read_at")]),
@@ -1751,7 +1952,9 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "pending_requests": len(data["availability"]) + len(data["leaves"]) + len(data["changes"]),
                 "unread_notifications": len([x for x in notifications if not x.get("read_at")]),
                 "estimated_salary": payroll[0]["total"] if payroll else 0,
+                "attendance_alerts": len(attendance_alerts),
             },
+            "attendance_alerts": attendance_alerts[:6],
             "today_shifts": [x for x in shifts if x.get("shift_date") == today],
             "upcoming_shifts": shifts[:6],
             "notifications": notifications[:6],
@@ -1810,23 +2013,28 @@ class RumiHandler(BaseHTTPRequestHandler):
         }
 
     def build_attendance_rows(self, user: dict, month: str) -> list[dict]:
+        """Return real attendance plus synthetic rows for official shifts without clocks."""
         start, end = month_bounds(month)
-        filters = {"work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"}
+        attendance_filters = {"work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"}
+        shift_filters = {"shift_date": f"gte.{start}", "and": f"(shift_date.lt.{end})", "status": "in.(Đã xếp,Đã xác nhận)"}
         if user.get("role") == "employee":
-            filters["employee_id"] = f"eq.{user['employee_id']}"
-        rows = SB.select(TABLES["attendance"], filters=filters, order="work_date.desc,check_in.desc")
-        employee_ids = [x.get("employee_id") for x in rows]
-        shift_ids = [x.get("shift_id") for x in rows]
+            attendance_filters["employee_id"] = f"eq.{user['employee_id']}"
+            shift_filters["employee_id"] = f"eq.{user['employee_id']}"
         data = parallel_calls(
-            employees=lambda: SB.select_in(TABLES["employees"], "id", employee_ids, columns="id,code,name,role"),
-            shifts=lambda: SB.select_in(
-                TABLES["shifts"], "id", shift_ids,
-                columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"
-            ),
+            attendance=lambda: SB.select(TABLES["attendance"], filters=attendance_filters, order="work_date.desc,check_in.desc"),
+            shifts=lambda: SB.select(TABLES["shifts"], filters=shift_filters, order="shift_date.desc,start_time.desc",
+                                     columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note"),
+            settings=lambda: SB.select(TABLES["settings"], filters={"id": "eq.1"}, limit=1),
         )
-        enriched = self.enriched_shifts(data["shifts"], employees=data["employees"], attendance=rows)
-        shift_map = {integer(x.get("id")): x for x in enriched}
-        output = add_people(rows, data["employees"])
+        rows = data["attendance"]
+        shifts = data["shifts"]
+        settings = data["settings"][0] if data["settings"] else {}
+        employee_ids = list({integer(x.get("employee_id")) for x in rows + shifts if integer(x.get("employee_id"))})
+        employees = SB.select_in(TABLES["employees"], "id", employee_ids, columns="id,code,name,role")
+        enriched_shifts = self.enriched_shifts(shifts, employees=employees, attendance=rows)
+        shift_map = {integer(x.get("id")): x for x in enriched_shifts}
+        attendance_by_shift = {integer(x.get("shift_id")): x for x in rows if integer(x.get("shift_id"))}
+        output = add_people(rows, employees)
         for item in output:
             item["shift"] = shift_map.get(integer(item.get("shift_id")))
             shift = item.get("shift")
@@ -1835,6 +2043,42 @@ class RumiHandler(BaseHTTPRequestHandler):
                 for key, value in derived.items():
                     if key not in item or item.get(key) in (None, "", 0, 0.0):
                         item[key] = value
+            item["actual_hours"] = num(item.get("worked_minutes")) / 60 if integer(item.get("worked_minutes")) else calculate_hours(str(item.get("check_in") or ""), str(item.get("check_out") or ""))
+            item["is_synthetic"] = False
+
+        people = employee_map(employees)
+        for shift in enriched_shifts:
+            shift_id = integer(shift.get("id"))
+            if shift_id in attendance_by_shift:
+                continue
+            live = classify_shift_attendance(shift, None, settings)
+            scheduled = shift_hours(str(shift.get("start_time")), str(shift.get("end_time")))
+            employee = people.get(integer(shift.get("employee_id")), {})
+            output.append({
+                "id": None,
+                "shift_id": shift_id,
+                "employee_id": shift.get("employee_id"),
+                "employee_name": employee.get("name"),
+                "employee_code": employee.get("code"),
+                "employee_role": employee.get("role"),
+                "work_date": shift.get("shift_date"),
+                "check_in": None,
+                "check_out": None,
+                "hours": 0,
+                "actual_hours": 0,
+                "payable_hours": 0,
+                "scheduled_hours": scheduled,
+                "late_minutes": live.get("minutes_late", 0),
+                "early_leave_minutes": 0,
+                "overtime_minutes": 0,
+                "status": live.get("status"),
+                "calculation_note": f"Có ca chính thức {str(shift.get('start_time'))[:5]}-{str(shift.get('end_time'))[:5]} nhưng chưa có chấm công hợp lệ.",
+                "risk_level": "Cao" if live.get("severity") == "danger" else ("Trung bình" if live.get("severity") == "warning" else "Thấp"),
+                "review_status": "Chờ duyệt" if live.get("severity") == "danger" else "Không cần duyệt",
+                "is_synthetic": True,
+                "shift": shift,
+            })
+        output.sort(key=lambda x: (str(x.get("work_date") or ""), str((x.get("shift") or {}).get("start_time") or x.get("check_in") or "")), reverse=True)
         return output
 
     def build_inventory_page(self, user: dict) -> dict:
@@ -1866,8 +2110,9 @@ class RumiHandler(BaseHTTPRequestHandler):
                 shift_openings=lambda: SB.select(TABLES["openings"], limit=1, columns="id"),
                 auth_sessions=lambda: SB.select(TABLES["auth_sessions"], limit=1, columns="id"),
                 attendance_events=lambda: SB.select(TABLES["attendance_events"], limit=1, columns="id"),
+                attendance_alerts=lambda: SB.select(TABLES["attendance_alerts"], limit=1, columns="id"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.1.0", "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.2.0", "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -1918,6 +2163,9 @@ class RumiHandler(BaseHTTPRequestHandler):
         if path == "/api/notifications/unread-count":
             return self.ok({"count": len(self.get_notifications(user, limit=500, unread_only=True))})
 
+        if path == "/api/attendance/alerts":
+            return self.ok(self.sync_attendance_alerts(user))
+
         if path == "/api/page/shift-market":
             start = parse_date(query.get("start", [monday_of(today_text()).isoformat()])[0], "Ngày đầu tuần")
             end = parse_date(query.get("end", [(monday_of(start) + timedelta(days=6)).isoformat()])[0], "Ngày cuối tuần")
@@ -1952,7 +2200,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 pending_overtime = [x for x in history if x.get("overtime_status") == "Chờ duyệt"]
                 pending_risk = [x for x in history if x.get("review_status") == "Chờ duyệt" or x.get("risk_level") == "Cao"]
                 settings_rows = SB.select(TABLES["settings"], filters={"id": "eq.1"}, limit=1)
-                return self.ok({"history": history, "corrections": correction_rows, "pending_overtime": pending_overtime, "pending_risk": pending_risk, "settings": settings_rows[0] if settings_rows else {}})
+                return self.ok({"history": history, "alerts": self.sync_attendance_alerts(user), "corrections": correction_rows, "pending_overtime": pending_overtime, "pending_risk": pending_risk, "settings": settings_rows[0] if settings_rows else {}})
             start, end = month_bounds(month)
             data = parallel_calls(
                 today_shifts=lambda: SB.select(TABLES["shifts"],
@@ -1977,13 +2225,36 @@ class RumiHandler(BaseHTTPRequestHandler):
                                             locations=data["locations"], attendance=data["attendance"])
             shift_map = {integer(x.get("id")): x for x in enriched}
             history = add_people(data["attendance"], [user.get("employee") or {}])
+            attendance_by_shift = {integer(x.get("shift_id")): x for x in data["attendance"] if integer(x.get("shift_id"))}
             for item in history:
                 item["shift"] = shift_map.get(integer(item.get("shift_id")))
+                item["is_synthetic"] = False
+            settings = data["settings"][0] if data["settings"] else {}
+            for raw_shift in data["correction_shifts"]:
+                shift_id = integer(raw_shift.get("id"))
+                if shift_id in attendance_by_shift:
+                    continue
+                shift = shift_map.get(shift_id, raw_shift)
+                live = classify_shift_attendance(shift, None, settings)
+                history.append({
+                    "id": None, "shift_id": shift_id, "employee_id": user["employee_id"],
+                    "employee_name": user["profile"].get("name"), "employee_code": user["profile"].get("employee_code"),
+                    "work_date": shift.get("shift_date"), "check_in": None, "check_out": None,
+                    "hours": 0, "actual_hours": 0, "payable_hours": 0,
+                    "scheduled_hours": shift_hours(str(shift.get("start_time")), str(shift.get("end_time"))),
+                    "late_minutes": live.get("minutes_late", 0), "early_leave_minutes": 0, "overtime_minutes": 0,
+                    "status": live.get("status"), "is_synthetic": True, "shift": shift,
+                })
+            history.sort(key=lambda x: (str(x.get("work_date") or ""), str((x.get("shift") or {}).get("start_time") or x.get("check_in") or "")), reverse=True)
+            today_enriched = [shift_map.get(integer(x.get("id")), x) for x in data["today_shifts"]]
+            for shift in today_enriched:
+                shift["live_attendance_state"] = classify_shift_attendance(shift, shift.get("attendance"), settings)
             corrections = SB.select(TABLES["attendance_corrections"], filters={"employee_id": f"eq.{user['employee_id']}"}, order="created_at.desc", limit=100)
             return self.ok({
-                "today_shifts": [shift_map.get(integer(x.get("id")), x) for x in data["today_shifts"]],
+                "today_shifts": today_enriched,
                 "correction_shifts": [shift_map.get(integer(x.get("id")), x) for x in data["correction_shifts"]],
                 "history": history,
+                "alerts": self.sync_attendance_alerts(user),
                 "corrections": corrections,
                 "settings": data["settings"][0] if data["settings"] else {},
             })
@@ -2860,7 +3131,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "p_now": now_iso(),
             }
             try:
-                result = SB.rpc("rumi_clock_shift_v55", rpc_body)
+                result = SB.rpc("rumi_clock_shift_v62", rpc_body)
             except APIError as exc:
                 try:
                     SB.insert(TABLES["attendance_events"], {
@@ -2887,6 +3158,8 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "distance_m": result.get("distance_m"), "accuracy_m": result.get("accuracy_m"),
                 "risk_level": result.get("risk_level"),
             })
+            ATTENDANCE_ALERT_CACHE.clear()
+            PAYROLL_CACHE.clear()
             return self.ok(result, message)
 
         if path == "/api/attendance/corrections":
@@ -3004,6 +3277,48 @@ class RumiHandler(BaseHTTPRequestHandler):
             self.audit(user, "review_risk", "attendance", attendance_id, {"status": status})
             return self.ok(rows[0], "Đã xử lý lượt chấm công rủi ro")
 
+        if path == "/api/attendance/alerts/remind":
+            self.require_role(user, "admin")
+            alert_id = integer(body.get("id"))
+            alerts = SB.select(TABLES["attendance_alerts"], filters={"id": f"eq.{alert_id}"}, limit=1)
+            if not alerts:
+                raise APIError("Không tìm thấy cảnh báo chấm công", 404)
+            alert = alerts[0]
+            shifts = SB.select(TABLES["shifts"], filters={"id": f"eq.{alert['shift_id']}"}, limit=1)
+            if not shifts:
+                raise APIError("Ca làm không còn tồn tại", 404)
+            shift = shifts[0]
+            message = f"Nhắc chấm công ca {str(shift.get('start_time'))[:5]}-{str(shift.get('end_time'))[:5]} ngày {shift.get('shift_date')}. Trạng thái hiện tại: {alert.get('status')}."
+            self.notify_employee(integer(alert.get("employee_id")), "Quản lý nhắc chấm công", message, "warning", "attendance")
+            SB.update(TABLES["attendance_alerts"], {"notified_employee_at": now_iso(), "last_detected_at": now_iso()}, {"id": f"eq.{alert_id}"})
+            self.audit(user, "remind", "attendance_alert", alert_id, {"status": alert.get("status")})
+            ATTENDANCE_ALERT_CACHE.clear()
+            return self.ok(None, "Đã gửi nhắc nhở cho nhân viên")
+
+        if path == "/api/attendance/alerts/resolve":
+            self.require_role(user, "admin")
+            alert_id = integer(body.get("id"))
+            action = str(body.get("action") or "dismiss")
+            note = str(body.get("note") or "").strip()
+            alerts = SB.select(TABLES["attendance_alerts"], filters={"id": f"eq.{alert_id}"}, limit=1)
+            if not alerts:
+                raise APIError("Không tìm thấy cảnh báo chấm công", 404)
+            alert = alerts[0]
+            if action == "absent" and alert.get("status") != "Vắng ca":
+                raise APIError("Chỉ xác nhận vắng sau khi ca đã kết thúc", 409)
+            final_status = "Vắng ca" if action == "absent" else "Đã xử lý"
+            resolution = note or ("Admin xác nhận nhân viên vắng ca" if action == "absent" else "Admin đã kiểm tra cảnh báo")
+            SB.update(TABLES["attendance_alerts"], {
+                "status": final_status,
+                "resolved_at": now_iso(),
+                "resolution_note": resolution,
+                "last_detected_at": now_iso(),
+            }, {"id": f"eq.{alert_id}"})
+            self.notify_employee(integer(alert.get("employee_id")), "Cảnh báo chấm công đã được xử lý", resolution, "attendance", "attendance")
+            self.audit(user, "resolve", "attendance_alert", alert_id, {"action": action, "note": resolution})
+            ATTENDANCE_ALERT_CACHE.clear()
+            return self.ok(None, "Đã xử lý cảnh báo chấm công")
+
         if path == "/api/attendance/manual":
             self.require_role(user, "admin")
             shift_id = integer(body.get("shift_id"))
@@ -3049,6 +3364,8 @@ class RumiHandler(BaseHTTPRequestHandler):
                 if integer(x.get("missing_attendance_count"))
                 or integer(x.get("incomplete_attendance_count"))
                 or integer(x.get("pending_checkin_count"))
+                or integer(x.get("late_unclocked_count"))
+                or integer(x.get("no_show_risk_count"))
                 or integer(x.get("active_shift_count"))
                 or integer(x.get("upcoming_shift_count"))
             ]
@@ -3254,6 +3571,10 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "overtime_requires_approval": str(body.get("overtime_requires_approval", "true")).lower() in {"1","true","yes","on"},
                 "location_freshness_seconds": integer(body.get("location_freshness_seconds"), 120),
                 "min_clock_gap_minutes": integer(body.get("min_clock_gap_minutes"), 1),
+                "attendance_warning_minutes": integer(body.get("attendance_warning_minutes"), 15),
+                "attendance_no_show_minutes": integer(body.get("attendance_no_show_minutes"), 30),
+                "attendance_absent_after_end_minutes": integer(body.get("attendance_absent_after_end_minutes"), 0),
+                "attendance_alert_refresh_seconds": integer(body.get("attendance_alert_refresh_seconds"), 60),
             }, "id")
             self.audit(user, "update", "settings", 1)
             return self.ok(row, "Đã cập nhật quy định chấm công")

@@ -4,7 +4,7 @@
    keeps all business rules on the Python/PostgreSQL backend. */
 
 window.RumiV5 = (() => {
-  const VERSION = '5.4.0';
+  const VERSION = '6.2.0';
   const pageNode = () => document.querySelector('#page');
   const localISO = (date) => {
     const d = new Date(date);
@@ -67,6 +67,17 @@ window.RumiV5 = (() => {
     <button class="v5-action" data-nav="${page}">
       <span>${icons[icon]}</span><span><strong>${esc(title)}</strong><small>${esc(text)}</small></span>
     </button>`;
+
+  const attendanceAlertList = (rows = [], admin = false) => rows.length ? `<div class="v62-alert-list">${rows.map((x) => {
+    const shift = x.shift || {};
+    const time = `${String(shift.start_time || '').slice(0,5)}–${String(shift.end_time || '').slice(0,5)}`;
+    const statusClass = x.severity === 'danger' ? 'danger' : (x.severity === 'warning' ? 'warning' : 'info');
+    return `<article class="v62-attendance-alert ${statusClass}">
+      <span class="v62-alert-pulse"></span>
+      <div class="v62-alert-copy"><strong>${esc(x.status)}</strong><span>${admin ? `${esc(x.employee_name || 'Nhân viên')} · ` : ''}${dateVN(shift.shift_date)} · ${esc(time)} · ${esc(x.location_name || 'RUMI')}</span>${x.minutes_late ? `<small>Đã trễ ${x.minutes_late} phút</small>` : ''}</div>
+      <div class="v62-alert-actions">${admin ? `<button class="btn small secondary" data-v5-action="attendance-remind" data-id="${x.id}">Nhắc ngay</button><button class="btn small secondary" data-nav="schedule">Tìm người thay</button>${x.status === 'Vắng ca' ? `<button class="btn small danger" data-v5-action="attendance-resolve" data-mode="absent" data-id="${x.id}">Xác nhận vắng</button>` : `<button class="btn small ghost" data-v5-action="attendance-resolve" data-mode="dismiss" data-id="${x.id}">Đã kiểm tra</button>`}` : `<button class="btn small" data-nav="attendance">Mở chấm công</button>`}</div>
+    </article>`;
+  }).join('')}</div>` : '';
 
   const exportButton = (kind, label = 'Xuất CSV') => `<button class="btn secondary" data-v5-action="export" data-export="${kind}">
     <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"/></svg>${esc(label)}</button>`;
@@ -138,7 +149,7 @@ window.RumiV5 = (() => {
   function setupVersion() {
     const chip = document.querySelector('.store-chip');
     if (chip && !chip.querySelector('.v5-version')) chip.insertAdjacentHTML('beforeend', `<span class="v5-version">V${VERSION}</span>`);
-    document.title = 'RUMI Manager 5.3.2 — Xếp ca, chấm công và Excel';
+    document.title = 'RUMI Manager 6.2 — Cảnh báo công & PDF lương';
   }
 
   function setupMobileNav() {
@@ -192,6 +203,7 @@ window.RumiV5 = (() => {
     const s = d.stats;
     if (state.user.role === 'admin') {
       const urgent = [];
+      if (s.attendance_alerts) urgent.push(priorityItem(s.attendance_danger ? 'danger' : 'warning', 'clock', `${s.attendance_alerts} cảnh báo chấm công`, s.attendance_danger ? 'Có ca nguy cơ vắng hoặc thiếu giờ ra.' : 'Có nhân viên đến giờ nhưng chưa chấm công.', 'attendance'));
       if (s.pending_schedule) urgent.push(priorityItem('warning', 'calendar', `${s.pending_schedule} lịch rảnh đang chờ`, 'Duyệt để có thể xếp ca đúng nguyện vọng.', 'requests'));
       if (s.pending_requests) urgent.push(priorityItem('danger', 'request', `${s.pending_requests} yêu cầu nghỉ / thay ca`, 'Xử lý sớm để không thiếu người trong ca.', 'requests'));
       if (s.low_stock) urgent.push(priorityItem('danger', 'box', `${s.low_stock} nguyên liệu dưới định mức`, 'Kiểm tra tồn kho và danh sách cần mua.', 'inventory'));
@@ -219,6 +231,7 @@ window.RumiV5 = (() => {
             ${quickAction('inventory','box','Nhập kho','Cập nhật nguyên liệu')}
           </div></div></div>
         </section>
+        ${d.attendance_alerts?.length ? `<section class="card section-gap v62-alert-panel"><div class="card-head"><div><h3>Cảnh báo chấm công theo thời gian thực</h3><p>Hệ thống dùng giờ máy chủ để phát hiện ca chưa chấm vào/ra.</p></div><button class="btn small secondary" data-nav="attendance">Xử lý tất cả</button></div><div class="card-body">${attendanceAlertList(d.attendance_alerts, true)}</div></section>` : ''}
         <section class="grid-2 section-gap">
           <div class="card"><div class="card-head"><div><h3>Ca làm hôm nay</h3><p>Tiến độ theo từng nhân viên</p></div><button class="btn small secondary" data-nav="schedule">Xem lịch tuần</button></div><div class="card-body">${shiftList(d.today_shifts)}</div></div>
           <div class="card"><div class="card-head"><div><h3>Thông báo mới</h3><p>Các thay đổi gần đây</p></div><button class="btn small secondary" data-nav="notifications">Xem tất cả</button></div><div class="card-body">${notificationList(d.notifications)}</div></div>
@@ -232,6 +245,7 @@ window.RumiV5 = (() => {
           ${next ? `<div class="v5-hero-meta"><span>${icons.calendar} Ca tiếp theo ${dateVN(next.shift_date)}</span><span>${icons.clock} ${esc(next.start_time)}–${esc(next.end_time)}</span><span>${icons.location} ${esc(next.location_name || 'RUMI')}</span></div>` : ''}</div>
           <div class="hero-actions"><button class="btn secondary" data-nav="attendance">${icons.gps} Chấm công</button><button class="btn secondary" data-nav="availability">${icons.calendar} Đăng ký lịch rảnh</button></div>
         </section>
+        ${d.attendance_alerts?.length ? `<section class="section-gap">${attendanceAlertList(d.attendance_alerts, false)}</section>` : ''}
         <section class="v5-summary-strip">
           ${summaryItem('Ca sắp tới', s.upcoming_shifts, 'Từ hôm nay')}
           ${summaryItem('Giờ tháng này', `${number(s.month_hours, 2)} giờ`, 'Đã hoàn thành')}
@@ -361,42 +375,57 @@ window.RumiV5 = (() => {
   renderAttendance = async function renderAttendanceV53() {
     if (state.user.role === 'employee') return renderEmployeeAttendanceV53();
     const pageData = await api(`/api/page/attendance?month=${state.month}`);
-    const rows = pageData.history || [];
-    state.cache.attendance = rows;
+    const rows = pageData.history || [], alerts = pageData.alerts || [];
+    state.cache.attendance = rows; state.cache.attendanceAlerts = alerts;
     const done = rows.filter((x) => x.check_out).length;
     const issues = rows.filter((x) => Number(x.late_minutes || 0) || Number(x.early_leave_minutes || 0)).length;
     const overtime = total(rows, 'overtime_minutes');
     pageNode().innerHTML = `
       ${intro('CHẤM CÔNG → TÍNH LƯƠNG', 'Bảng công chi tiết', 'Mỗi lượt công thể hiện ca dự kiến, giờ thực tế, đi trễ, về sớm, tăng ca và số giờ dùng để tính lương.', exportButton('attendance', 'Xuất bảng công'))}
+      ${alerts.length ? `<section class="card v62-alert-panel"><div class="card-head"><div><h3>Cảnh báo cần xử lý ngay</h3><p>Nhắc nhân viên, tìm người thay hoặc xác nhận vắng sau khi ca kết thúc.</p></div><span class="v5-filter-count">${alerts.length} cảnh báo</span></div><div class="card-body">${attendanceAlertList(alerts, true)}</div></section>` : ''}
       <section class="v5-summary-strip">
-        ${summaryItem('Ca hoàn thành', done, `${rows.length} lượt trong tháng`)}
+        ${summaryItem('Ca hoàn thành', done, `${rows.length} dòng lịch/công trong tháng`)}
         ${summaryItem('Giờ được trả', `${number(total(rows, 'payable_hours') || total(rows, 'hours'), 2)} giờ`, 'Dùng tính bảng lương')}
         ${summaryItem('Cần chú ý', issues, 'Đi trễ hoặc về sớm')}
         ${summaryItem('Tăng ca', `${number(overtime / 60, 2)} giờ`, `${overtime} phút`)}
       </section>
       ${filterToolbar(`<div class="search-box">${icons.search}<input id="v5-attendance-search" placeholder="Tìm nhân viên hoặc ngày..."></div><input type="month" id="attendance-month" value="${state.month}"><select id="v5-attendance-status"><option value="">Tất cả trạng thái</option>${[...new Set(rows.map((x) => x.status).filter(Boolean))].map((x) => `<option>${esc(x)}</option>`).join('')}</select><span id="v5-attendance-count" class="v5-filter-count">${rows.length} dòng</span>`)}
       <div class="table-wrap"><table><thead><tr><th>Nhân viên</th><th>Ngày / ca</th><th>Vào – ra</th><th>Giờ dự kiến</th><th>Giờ tính lương</th><th>Trễ / sớm / tăng ca</th><th>GPS</th><th>Trạng thái</th><th></th></tr></thead><tbody id="v5-attendance-rows">
-        ${rows.map((x) => `<tr data-search="${esc(normalize(`${x.employee_name} ${x.employee_code} ${x.work_date}`))}" data-status="${esc(x.status)}"><td>${person(x.employee_name, x.employee_code)}</td><td><span class="cell-main">${dateVN(x.work_date)}</span><span class="cell-sub">${x.shift ? `${x.shift.start_time}–${x.shift.end_time}` : 'Ngoài lịch'}</span></td><td><span class="cell-main">${esc(x.check_in || '—')} – ${esc(x.check_out || '—')}</span><span class="cell-sub">${number(x.actual_hours || x.hours,2)} giờ thực tế</span></td><td>${number(x.scheduled_hours || 0,2)} giờ</td><td class="money"><strong>${number(x.payable_hours || x.hours,2)} giờ</strong></td><td><span class="v53-metric late">Trễ ${x.late_minutes || 0}p</span><span class="v53-metric early">Sớm ${x.early_leave_minutes || 0}p</span><span class="v53-metric overtime">TC ${x.overtime_minutes || 0}p</span></td><td><span class="cell-main">${x.check_in_distance_m != null ? `${number(x.check_in_distance_m,1)} m` : 'Thủ công'}</span><span class="cell-sub">${x.check_in_accuracy_m ? `Sai số ${number(x.check_in_accuracy_m,0)} m` : ''}</span></td><td>${badge(x.status)}</td><td><button class="btn small secondary" data-action="attendance-edit" data-id="${x.shift_id || ''}" ${!x.shift_id ? 'disabled' : ''}>${icons.edit}</button></td></tr>`).join('') || `<tr><td colspan="9">${empty('Chưa có dữ liệu công', 'Dữ liệu xuất hiện sau khi nhân viên chấm công.', 'clock')}</td></tr>`}
+        ${rows.map((x) => `<tr data-search="${esc(normalize(`${x.employee_name} ${x.employee_code} ${x.work_date}`))}" data-status="${esc(x.status)}"><td>${person(x.employee_name, x.employee_code)}</td><td><span class="cell-main">${dateVN(x.work_date)}</span><span class="cell-sub">${x.shift ? `${x.shift.start_time}–${x.shift.end_time}` : 'Ngoài lịch'}</span></td><td><span class="cell-main">${esc(x.check_in || '—')} – ${esc(x.check_out || '—')}</span><span class="cell-sub">${number(x.actual_hours || x.hours,2)} giờ thực tế</span></td><td>${number(x.scheduled_hours || 0,2)} giờ</td><td class="money"><strong>${number(x.payable_hours || x.hours,2)} giờ</strong></td><td><span class="v53-metric late">Trễ ${x.late_minutes || 0}p</span><span class="v53-metric early">Sớm ${x.early_leave_minutes || 0}p</span><span class="v53-metric overtime">TC ${x.overtime_minutes || 0}p</span></td><td><span class="cell-main">${x.check_in_distance_m != null ? `${number(x.check_in_distance_m,1)} m` : (x.is_synthetic ? 'Chưa chấm' : 'Thủ công')}</span><span class="cell-sub">${x.check_in_accuracy_m ? `Sai số ${number(x.check_in_accuracy_m,0)} m` : ''}</span></td><td>${badge(x.status)}</td><td><button class="btn small secondary" data-action="attendance-edit" data-id="${x.shift_id || ''}" ${!x.shift_id ? 'disabled' : ''}>${icons.edit}</button></td></tr>`).join('') || `<tr><td colspan="9">${empty('Chưa có dữ liệu công', 'Dữ liệu xuất hiện sau khi nhân viên chấm công.', 'clock')}</td></tr>`}
       </tbody></table></div>`;
   };
 
   async function renderEmployeeAttendanceV53() {
     const pageData = await api(`/api/page/attendance?month=${state.month}`);
-    const todayShifts = pageData.today_shifts || [], history = pageData.history || [], settings = pageData.settings || {};
-    state.cache.todayShifts = todayShifts; state.cache.attendance = history;
+    const todayShifts = pageData.today_shifts || [], history = pageData.history || [], settings = pageData.settings || {}, alerts = pageData.alerts || [];
+    state.cache.todayShifts = todayShifts; state.cache.attendance = history; state.cache.attendanceAlerts = alerts;
     pageNode().innerHTML = `
       ${intro('CHẤM CÔNG GPS', 'Vào và ra ca đúng cửa hàng', 'Chấm công hợp lệ sẽ tự chuyển thành giờ tính lương trong bảng lương tháng.')}
+      ${alerts.length ? `<section class="section-gap">${attendanceAlertList(alerts, false)}</section>` : ''}
       <div class="v5-gps-panel"><span class="v5-gps-icon">${icons.gps}</span><div class="v5-gps-copy"><strong id="v5-gps-title">Kiểm tra GPS trước khi chấm công</strong><span id="v5-gps-text">Bật vị trí chính xác để kiểm tra sai số và quyền truy cập.</span></div><button class="btn secondary" data-v5-action="gps-test">${icons.gps} Kiểm tra vị trí</button></div>
-      <div class="info-banner">${icons.info}<div><strong>Quy định hiện tại</strong><span>Vào ca: trước ${settings.checkin_before_minutes || 15} phút đến sau ${settings.checkin_after_minutes || 5} phút. Ra ca: trước ${settings.checkout_before_minutes || 5} phút đến sau ${settings.checkout_after_minutes || 5} phút.</span></div></div>
+      <div class="info-banner">${icons.info}<div><strong>Quy định hiện tại</strong><span>Vào ca: được mở trước ${settings.checkin_before_minutes || 15} phút; sau ${settings.checkin_after_minutes || 5} phút hệ thống ghi nhận đi trễ. Quá ${settings.attendance_no_show_minutes || 30} phút sẽ cảnh báo nguy cơ vắng. Ra ca: trước ${settings.checkout_before_minutes || 5} phút đến sau ${settings.checkout_after_minutes || 5} phút.</span></div></div>
       <div class="v5-clock-grid section-gap">${todayShifts.length ? todayShifts.map(clockCardV53).join('') : empty('Hôm nay không có ca', 'Bạn chỉ có thể chấm công cho ca đã được admin xếp.', 'calendar')}</div>
       <div class="section-gap card"><div class="card-head"><div><h3>Lịch sử công tháng ${state.month}</h3><p>${number(total(history, 'payable_hours') || total(history, 'hours'), 2)} giờ được tính lương</p></div><div style="display:flex;gap:8px"><input class="compact-input" type="month" id="attendance-month" value="${state.month}">${exportButton('attendance', 'Xuất công')}</div></div><div class="card-body">${history.length ? `<div class="list">${history.map((x) => `<div class="list-row"><span class="list-icon">${icons.clock}</span><div class="list-copy"><strong>${dateVN(x.work_date)} · ${esc(x.check_in || '—')}–${esc(x.check_out || 'Chưa ra')}</strong><span>${number(x.payable_hours || x.hours,2)} giờ tính lương · Trễ ${x.late_minutes || 0}p · Sớm ${x.early_leave_minutes || 0}p · Tăng ca ${x.overtime_minutes || 0}p</span></div>${badge(x.status)}</div>`).join('')}</div>` : empty('Chưa có giờ công', 'Sau khi chấm công, lịch sử sẽ xuất hiện tại đây.', 'clock')}</div></div>`;
   }
 
   function clockCardV53(x) {
     const att = x.attendance;
-    const action = !att ? 'checkin' : att.check_out_at || att.check_out ? 'done' : 'checkout';
+    const live = x.live_attendance_state || {};
+    const liveStatus = live.status || 'Chưa chấm công';
+    const action = !att ? (liveStatus === 'Vắng ca' ? 'blocked' : 'checkin') : att.check_out_at || att.check_out ? 'done' : 'checkout';
     const target = `${x.shift_date}T${action === 'checkout' ? x.end_time : x.start_time}:00`;
-    return `<article class="v5-clock-card"><span class="v5-kicker">${dateVN(x.shift_date)} · ${esc(x.location_name || 'RUMI')}</span><div class="v5-clock-time">${esc(x.start_time)} – ${esc(x.end_time)}</div><p class="v5-clock-location">${esc(x.location_address || 'Vị trí do quản lý cấu hình')}</p><div class="shift-meta"><div><span>Trạng thái</span><strong>${att ? esc(att.status) : 'Chưa chấm công'}</strong></div><div><span>Giờ tính lương</span><strong>${number(att?.payable_hours || att?.hours || 0,2)} giờ</strong></div></div><div class="v5-clock-status">${icons.clock}<span>${action === 'done' ? `Trễ ${att.late_minutes || 0}p · Sớm ${att.early_leave_minutes || 0}p · Tăng ca ${att.overtime_minutes || 0}p` : `Còn <b class="v5-countdown" data-countdown="${target}">đang tính…</b> đến mốc ca`}</span></div>${action === 'done' ? `<button class="btn secondary" disabled>${icons.check} Đã hoàn thành</button>` : `<button class="btn" data-action="clock-shift" data-id="${x.id}" data-clock="${action}">${icons.gps} ${action === 'checkin' ? 'Chấm công vào' : 'Chấm công ra'}</button>`}</article>`;
+    const danger = ['Đi trễ chưa chấm','Nguy cơ vắng ca','Vắng ca','Thiếu giờ ra'].includes(liveStatus);
+    const clockMessage = action === 'done'
+      ? `Trễ ${att.late_minutes || 0}p · Sớm ${att.early_leave_minutes || 0}p · Tăng ca ${att.overtime_minutes || 0}p`
+      : action === 'blocked'
+        ? 'Ca đã kết thúc mà không có chấm công vào. Hãy gửi yêu cầu sửa công.'
+        : live.message || `Còn <b class="v5-countdown" data-countdown="${target}">đang tính…</b> đến mốc ca`;
+    const button = action === 'done'
+      ? `<button class="btn secondary" disabled>${icons.check} Đã hoàn thành</button>`
+      : action === 'blocked'
+        ? `<button class="btn secondary" data-v55-action="correction-open">${icons.edit} Gửi yêu cầu sửa công</button>`
+        : `<button class="btn ${danger ? 'danger' : ''}" data-action="clock-shift" data-id="${x.id}" data-clock="${action}">${icons.gps} ${action === 'checkin' ? (danger ? 'Chấm vào muộn' : 'Chấm công vào') : 'Chấm công ra'}</button>`;
+    return `<article class="v5-clock-card ${danger ? 'attendance-danger' : ''}"><span class="v5-kicker">${dateVN(x.shift_date)} · ${esc(x.location_name || 'RUMI')}</span><div class="v5-clock-time">${esc(x.start_time)} – ${esc(x.end_time)}</div><p class="v5-clock-location">${esc(x.location_address || 'Vị trí do quản lý cấu hình')}</p><div class="shift-meta"><div><span>Trạng thái</span><strong>${att ? esc(att.status) : esc(liveStatus)}</strong></div><div><span>Giờ tính lương</span><strong>${number(att?.payable_hours || att?.hours || 0,2)} giờ</strong></div></div><div class="v5-clock-status">${icons.clock}<span>${clockMessage}</span></div>${button}</article>`;
   }
 
   function filterAttendance() {
@@ -429,13 +458,15 @@ window.RumiV5 = (() => {
       + Number(x.upcoming_shift_count || 0)
       + Number(x.active_shift_count || 0)
       + Number(x.pending_checkin_count || 0)
+      + Number(x.late_unclocked_count || 0)
+      + Number(x.no_show_risk_count || 0)
       + Number(x.missing_attendance_count || 0)
       + Number(x.incomplete_attendance_count || 0), 0);
     const actions = admin
       ? `<div class="v53-payroll-actions">${runStatus === 'Đã chốt'
           ? `<button class="btn secondary" data-v5-action="payroll-unlock">Mở khóa</button>`
-          : `<button class="btn secondary" data-v5-action="payroll-generate">Tính lại</button><button class="btn" data-v5-action="payroll-lock" ${unresolved ? 'disabled title="Còn ca chưa hoàn tất"' : ''}>${icons.check} Chốt bảng lương</button>`}${exportButton('payroll', 'Xuất bảng lương')}</div>`
-      : exportButton('payroll', 'Xuất phiếu lương');
+          : `<button class="btn secondary" data-v5-action="payroll-generate">Tính lại</button><button class="btn" data-v5-action="payroll-lock" ${unresolved ? 'disabled title="Còn ca chưa hoàn tất"' : ''}>${icons.check} Chốt bảng lương</button>`}${exportButton('payroll', 'Xuất Excel/CSV')}<button class="btn secondary" data-v5-action="payroll-pdf">Xuất PDF bảng lương</button></div>`
+      : `<div style="display:flex;gap:8px;flex-wrap:wrap">${exportButton('payroll', 'Xuất CSV')}<button class="btn secondary" data-v5-action="payroll-pdf">Xuất PDF</button></div>`;
 
     pageNode().innerHTML = `
       ${intro('BẢNG LƯƠNG THÁNG', admin ? `Bảng lương ${state.month}` : 'Phiếu lương của tôi', admin ? 'Lịch làm, chấm công và giờ tính lương được tách riêng để tránh nhầm số liệu.' : 'Lương chỉ tính từ giờ chấm công hợp lệ đã hoàn tất.', actions)}
@@ -457,7 +488,7 @@ window.RumiV5 = (() => {
           const payButton = paidStatus
             ? `<button class="btn small secondary" data-action="payroll-pay" data-id="${x.employee_id}" data-status="Chưa thanh toán">Hoàn tác</button>`
             : `<button class="btn small success" data-action="payroll-pay" data-id="${x.employee_id}" data-status="Đã thanh toán" ${canPay ? '' : 'disabled title="Chỉ trả sau khi bảng lương đã chốt và công đã hoàn tất"'}>Đã trả</button>`;
-          return `<tr data-search="${esc(normalize(`${x.name} ${x.code}`))}" data-status="${esc(x.payment_status)}">${admin ? `<td>${person(x.name, x.code)}</td>` : ''}<td><span class="cell-main">${x.scheduled_shift_count || 0} ca lịch · ${number(x.scheduled_hours,2)} giờ</span><span class="cell-sub">${x.completed_shift_count || x.attendance_count || 0} ca hoàn tất · ${number(x.actual_hours,2)} giờ thực tế · ${number(x.payable_hours || x.hours,2)} giờ tính lương</span></td><td>${badge(x.payroll_state || 'Chưa có dữ liệu')}${x.missing_attendance_count ? `<span class="cell-sub">${x.missing_attendance_count} ca thiếu công</span>` : ''}${x.incomplete_attendance_count ? `<span class="cell-sub">${x.incomplete_attendance_count} ca thiếu giờ ra</span>` : ''}</td><td><span class="v53-metric late">${x.late_minutes || 0}p trễ</span><span class="v53-metric early">${x.early_leave_minutes || 0}p sớm</span><span class="v53-metric overtime">${x.overtime_minutes || 0}p TC</span></td><td class="money"><strong>${money(x.base_salary)}</strong><span class="cell-sub">Dự kiến theo lịch ${money(x.estimated_salary || Number(x.scheduled_hours||0)*Number(x.hourly_wage||0))}</span></td><td><span class="cell-main">+${money(x.bonus)} / -${money(Number(x.penalty||0)+Number(x.advance_pay||0))}</span><span class="cell-sub">Phạt ${money(x.penalty)} · Ứng ${money(x.advance_pay)}</span></td><td class="money"><strong>${money(x.total)}</strong></td><td>${badge(displayPayment)}</td><td><div class="actions">${admin ? `<button class="btn small secondary" data-action="payroll-adjust" data-id="${x.employee_id}" ${runStatus === 'Đã chốt' ? 'disabled title="Mở khóa để sửa"' : ''}>${icons.edit} Điều chỉnh</button>${payButton}` : ''}<button class="btn small secondary" data-v5-action="payroll-slip" data-id="${x.employee_id}">${runStatus === 'Đã chốt' ? 'Phiếu lương' : 'Phiếu tạm tính'}</button></div></td></tr>`;
+          return `<tr data-search="${esc(normalize(`${x.name} ${x.code}`))}" data-status="${esc(x.payment_status)}">${admin ? `<td>${person(x.name, x.code)}</td>` : ''}<td><span class="cell-main">${x.scheduled_shift_count || 0} ca lịch · ${number(x.scheduled_hours,2)} giờ</span><span class="cell-sub">${x.completed_shift_count || x.attendance_count || 0} ca hoàn tất · ${number(x.actual_hours,2)} giờ thực tế · ${number(x.payable_hours || x.hours,2)} giờ tính lương</span></td><td>${badge(x.payroll_state || 'Chưa có dữ liệu')}${x.absent_shift_count ? `<span class="cell-sub">${x.absent_shift_count} ca vắng</span>` : ''}${x.no_show_risk_count ? `<span class="cell-sub">${x.no_show_risk_count} ca nguy cơ vắng</span>` : ''}${x.late_unclocked_count ? `<span class="cell-sub">${x.late_unclocked_count} ca đi trễ chưa chấm</span>` : ''}${x.missing_attendance_count && !x.absent_shift_count ? `<span class="cell-sub">${x.missing_attendance_count} ca thiếu công</span>` : ''}${x.incomplete_attendance_count ? `<span class="cell-sub">${x.incomplete_attendance_count} ca thiếu giờ ra</span>` : ''}</td><td><span class="v53-metric late">${x.late_minutes || 0}p trễ</span><span class="v53-metric early">${x.early_leave_minutes || 0}p sớm</span><span class="v53-metric overtime">${x.overtime_minutes || 0}p TC</span></td><td class="money"><strong>${money(x.base_salary)}</strong><span class="cell-sub">Dự kiến theo lịch ${money(x.estimated_salary || Number(x.scheduled_hours||0)*Number(x.hourly_wage||0))}</span></td><td><span class="cell-main">+${money(x.bonus)} / -${money(Number(x.penalty||0)+Number(x.advance_pay||0))}</span><span class="cell-sub">Phạt ${money(x.penalty)} · Ứng ${money(x.advance_pay)}</span></td><td class="money"><strong>${money(x.total)}</strong></td><td>${badge(displayPayment)}</td><td><div class="actions">${admin ? `<button class="btn small secondary" data-action="payroll-adjust" data-id="${x.employee_id}" ${runStatus === 'Đã chốt' ? 'disabled title="Mở khóa để sửa"' : ''}>${icons.edit} Điều chỉnh</button>${payButton}` : ''}<button class="btn small secondary" data-v5-action="payroll-slip" data-id="${x.employee_id}">${runStatus === 'Đã chốt' ? 'Xuất PDF phiếu lương' : 'PDF tạm tính'}</button></div></td></tr>`;
         }).join('') || `<tr><td colspan="9">${empty('Chưa có bảng lương', 'Hãy tạo lịch, hoàn tất chấm công rồi bấm Tính lại bảng lương.', 'money')}</td></tr>`}
       </tbody></table></div>`;
   };
@@ -684,13 +715,60 @@ window.RumiV5 = (() => {
     toast('Chưa có dữ liệu để xuất', 'error');
   }
 
+  function openPrintDocument(title, body, {landscape = false, autoPrint = true} = {}) {
+    const popup = window.open('', '_blank', landscape ? 'width=1280,height=850' : 'width=920,height=820');
+    if (!popup) return toast('Trình duyệt đang chặn cửa sổ xuất PDF', 'error');
+    popup.document.open();
+    popup.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>
+      @page{size:A4 ${landscape ? 'landscape' : 'portrait'};margin:12mm}*{box-sizing:border-box}body{font-family:Arial,"Helvetica Neue",sans-serif;color:#2d211b;margin:0;background:#fff;font-size:12px}.sheet{max-width:${landscape ? '1100px' : '820px'};margin:0 auto}.brand{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #8b4e34;padding-bottom:14px}.brand h1{margin:0;font-size:25px;letter-spacing:.02em}.brand .meta{text-align:right;color:#78665d;line-height:1.6}.box{border:1px solid #dcc9bc;border-radius:14px;padding:18px;margin-top:18px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:11px 28px}.line{display:flex;justify-content:space-between;gap:24px;border-bottom:1px dashed #ded3cc;padding:9px 0}.line b{text-align:right}.total{font-size:20px;font-weight:800;border-top:2px solid #8b4e34;border-bottom:0;margin-top:4px}.muted{color:#78665d}.state{display:inline-flex;padding:5px 10px;border-radius:999px;background:#f4e8df;color:#7d432c;font-weight:700}.warning{background:#fff1cf;color:#8a5d00}.danger{background:#fde5df;color:#a33f31}.success{background:#e5f3e9;color:#2f704b}.notice{margin-top:14px;padding:12px 14px;border-radius:10px;background:#fff4e8;border-left:4px solid #bd6b3e;line-height:1.5}.foot{margin-top:34px;display:flex;justify-content:space-between;text-align:center}.sign{width:220px;line-height:1.8}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:10px}th{background:#563426;color:#fff;text-align:left;padding:8px 6px}td{border-bottom:1px solid #e4d7ce;padding:7px 6px;vertical-align:top}.right{text-align:right}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}.summary div{border:1px solid #dfd0c5;border-radius:10px;padding:10px}.summary span{display:block;color:#78665d;font-size:10px}.summary strong{display:block;font-size:16px;margin-top:4px}.watermark{position:fixed;inset:40% 0 auto;text-align:center;font-size:72px;font-weight:900;color:rgba(139,78,52,.07);transform:rotate(-18deg);pointer-events:none}.printbar{position:fixed;right:20px;bottom:20px;display:flex;gap:8px}.printbar button{border:0;border-radius:10px;padding:11px 16px;background:#8b4e34;color:#fff;font-weight:700;cursor:pointer;box-shadow:0 8px 28px rgba(61,40,31,.2)}@media print{.printbar{display:none}.sheet{max-width:none}.watermark{position:fixed}}
+    </style></head><body>${body}<div class="printbar"><button id="rumi-print-button" type="button">Lưu / In PDF</button></div></body></html>`);
+    popup.document.close();
+    const printButton = popup.document.getElementById('rumi-print-button');
+    printButton?.addEventListener('click', () => popup.print());
+    popup.focus();
+    if (autoPrint) window.setTimeout(() => { try { popup.print(); } catch {} }, 450);
+    return popup;
+  }
+
   function printPayslip(employeeId) {
     const row = (state.cache.payroll || []).find((x) => Number(x.employee_id) === Number(employeeId));
     if (!row) return toast('Không tìm thấy phiếu lương', 'error');
-    const popup = window.open('', '_blank', 'width=900,height=760');
-    if (!popup) return toast('Trình duyệt đang chặn cửa sổ in', 'error');
-    popup.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Phiếu lương ${esc(row.name)} · ${state.month}</title><style>body{font-family:Arial,sans-serif;color:#2d211b;padding:40px}h1{margin:0 0 6px}.muted{color:#78665d}.box{border:1px solid #ddd0c5;border-radius:18px;padding:24px;margin-top:24px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.line{display:flex;justify-content:space-between;border-bottom:1px dashed #ddd;padding:10px 0}.total{font-size:22px;font-weight:800}.foot{margin-top:30px;display:flex;justify-content:space-between;text-align:center}.sign{width:220px}@media print{button{display:none}}</style></head><body><h1>RUMI · PHIẾU LƯƠNG</h1><div class="muted">Tháng ${state.month} · ${esc(state.cache.payrollRun?.status || 'Tạm tính')}</div><div class="box"><div class="grid"><div><b>Nhân viên</b><br>${esc(row.name)}</div><div><b>Mã nhân viên</b><br>${esc(row.code || '')}</div><div><b>Vị trí</b><br>${esc(row.role || '')}</div><div><b>Lương theo giờ</b><br>${money(row.hourly_wage)}</div></div><hr><div class="line"><span>Giờ theo lịch</span><b>${number(row.scheduled_hours,2)} giờ</b></div><div class="line"><span>Giờ tính lương</span><b>${number(row.payable_hours || row.hours,2)} giờ</b></div><div class="line"><span>Đi trễ / về sớm / tăng ca</span><b>${row.late_minutes || 0}p / ${row.early_leave_minutes || 0}p / ${row.overtime_minutes || 0}p</b></div><div class="line"><span>Lương cơ bản</span><b>${money(row.base_salary)}</b></div><div class="line"><span>Thưởng</span><b>+ ${money(row.bonus)}</b></div><div class="line"><span>Phạt</span><b>- ${money(row.penalty)}</b></div><div class="line"><span>Tạm ứng</span><b>- ${money(row.advance_pay)}</b></div><div class="line total"><span>THỰC NHẬN</span><b>${money(row.total)}</b></div><div class="muted" style="margin-top:12px">Trạng thái: ${esc(row.payment_status)} · ${esc(row.note || 'Không có ghi chú')}</div></div><div class="foot"><div class="sign">Người lập bảng<br><br><br>________________</div><div class="sign">Nhân viên xác nhận<br><br><br>________________</div></div><button onclick="window.print()">In phiếu lương</button></body></html>`);
-    popup.document.close();
+    const runStatus = state.cache.payrollRun?.status || 'Tạm tính';
+    const issueCount = Number(row.pending_checkin_count || 0) + Number(row.late_unclocked_count || 0) + Number(row.no_show_risk_count || 0) + Number(row.absent_shift_count || 0) + Number(row.incomplete_attendance_count || 0) + Number(row.upcoming_shift_count || 0) + Number(row.active_shift_count || 0);
+    const stateTone = row.payroll_state === 'Đủ dữ liệu' ? 'success' : (['Vắng ca','Nguy cơ vắng ca','Thiếu giờ ra'].includes(row.payroll_state) ? 'danger' : 'warning');
+    const explanation = issueCount
+      ? `Phiếu hiện chưa đủ điều kiện thanh toán vì còn ${issueCount} ca chưa hoàn tất hoặc cần quản lý xử lý.`
+      : (Number(row.total || 0) <= 0 ? 'Phiếu không phát sinh số tiền phải trả trong tháng này.' : 'Dữ liệu công đã đầy đủ theo trạng thái hiện tại.');
+    const watermark = runStatus === 'Đã chốt' ? '' : '<div class="watermark">TẠM TÍNH</div>';
+    const body = `<div class="sheet">${watermark}<header class="brand"><div><h1>RUMI · PHIẾU LƯƠNG</h1><div class="muted">Bảng kê lương nhân viên</div></div><div class="meta">Tháng <b>${esc(state.month)}</b><br>Trạng thái bảng: <b>${esc(runStatus)}</b></div></header>
+      <section class="box"><div class="grid"><div><b>Nhân viên</b><br>${esc(row.name)}</div><div><b>Mã nhân viên</b><br>${esc(row.code || '')}</div><div><b>Vị trí</b><br>${esc(row.role || '')}</div><div><b>Lương theo giờ</b><br>${money(row.hourly_wage)}</div></div>
+      <div class="line"><span>Ca theo lịch / hoàn thành</span><b>${row.scheduled_shift_count || 0} / ${row.completed_shift_count || row.attendance_count || 0} ca</b></div>
+      <div class="line"><span>Giờ theo lịch</span><b>${number(row.scheduled_hours,2)} giờ</b></div>
+      <div class="line"><span>Giờ thực tế</span><b>${number(row.actual_hours,2)} giờ</b></div>
+      <div class="line"><span>Giờ tính lương</span><b>${number(row.payable_hours || row.hours,2)} giờ</b></div>
+      <div class="line"><span>Tình trạng công</span><b><span class="state ${stateTone}">${esc(row.payroll_state || 'Chưa có dữ liệu')}</span></b></div>
+      <div class="line"><span>Vắng / nguy cơ vắng / thiếu giờ ra</span><b>${row.absent_shift_count || 0} / ${row.no_show_risk_count || 0} / ${row.incomplete_attendance_count || 0} ca</b></div>
+      <div class="line"><span>Đi trễ / về sớm / tăng ca duyệt</span><b>${row.late_minutes || 0}p / ${row.early_leave_minutes || 0}p / ${row.overtime_minutes || 0}p</b></div>
+      <div class="line"><span>Lương cơ bản</span><b>${money(row.base_salary)}</b></div><div class="line"><span>Thưởng</span><b>+ ${money(row.bonus)}</b></div><div class="line"><span>Phạt</span><b>- ${money(row.penalty)}</b></div><div class="line"><span>Tạm ứng</span><b>- ${money(row.advance_pay)}</b></div><div class="line total"><span>THỰC NHẬN</span><b>${money(row.total)}</b></div>
+      <div class="notice"><b>Giải thích:</b> ${esc(explanation)}<br><span class="muted">Thanh toán: ${esc(row.payment_status || 'Chưa thanh toán')} · Ghi chú: ${esc(row.note || 'Không có')}</span></div></section>
+      <div class="foot"><div class="sign"><b>Người lập bảng</b><br><br><br>________________</div><div class="sign"><b>Nhân viên xác nhận</b><br><br><br>________________</div></div></div>`;
+    openPrintDocument(`RUMI - Phiếu lương ${row.name} - ${state.month}`, body);
+  }
+
+  function printPayrollReport() {
+    const rows = state.cache.payroll || [];
+    if (!rows.length) return toast('Chưa có bảng lương để xuất PDF', 'error');
+    const runStatus = state.cache.payrollRun?.status || 'Tạm tính';
+    const totalAmount = total(rows, 'total');
+    const unresolved = rows.reduce((sum, x) => sum + Number(x.pending_checkin_count||0) + Number(x.late_unclocked_count||0) + Number(x.no_show_risk_count||0) + Number(x.absent_shift_count||0) + Number(x.incomplete_attendance_count||0) + Number(x.upcoming_shift_count||0) + Number(x.active_shift_count||0), 0);
+    const bodyRows = rows.map((x, index) => `<tr><td>${index+1}</td><td><b>${esc(x.name)}</b><br><span class="muted">${esc(x.code || '')} · ${esc(x.role || '')}</span></td><td class="right">${x.scheduled_shift_count||0}<br><span class="muted">${number(x.scheduled_hours,2)}h</span></td><td class="right">${x.completed_shift_count||x.attendance_count||0}<br><span class="muted">${number(x.payable_hours||x.hours,2)}h lương</span></td><td>${esc(x.payroll_state||'')}</td><td class="right">${money(x.base_salary)}</td><td class="right">+${money(x.bonus)}<br>-${money(Number(x.penalty||0)+Number(x.advance_pay||0))}</td><td class="right"><b>${money(x.total)}</b></td><td>${esc(x.payment_status||'')}</td></tr>`).join('');
+    const watermark = runStatus === 'Đã chốt' ? '' : '<div class="watermark">BẢN NHÁP</div>';
+    const body = `<div class="sheet">${watermark}<header class="brand"><div><h1>RUMI · BẢNG LƯƠNG THÁNG</h1><div class="muted">Bảng tổng hợp lương nhân viên</div></div><div class="meta">Tháng <b>${esc(state.month)}</b><br>Trạng thái: <b>${esc(runStatus)}</b><br>Xuất lúc: ${new Date().toLocaleString('vi-VN')}</div></header>
+      <section class="summary"><div><span>Nhân viên</span><strong>${rows.length}</strong></div><div><span>Giờ tính lương</span><strong>${number(total(rows,'payable_hours')||total(rows,'hours'),2)}h</strong></div><div><span>Ca chưa hoàn tất</span><strong>${unresolved}</strong></div><div><span>Tổng thực nhận</span><strong>${money(totalAmount)}</strong></div></section>
+      ${unresolved ? `<div class="notice"><b>Cảnh báo:</b> Còn ${unresolved} ca chưa hoàn tất. Đây là số liệu ${runStatus === 'Đã chốt' ? 'đã chốt' : 'tạm tính'}; hãy xử lý công trước khi thanh toán.</div>` : ''}
+      <table><thead><tr><th>#</th><th>Nhân viên</th><th>Ca lịch</th><th>Ca công</th><th>Tình trạng</th><th class="right">Lương cơ bản</th><th class="right">Điều chỉnh</th><th class="right">Thực nhận</th><th>Thanh toán</th></tr></thead><tbody>${bodyRows}<tr><td colspan="7"><b>TỔNG CỘNG</b></td><td class="right"><b>${money(totalAmount)}</b></td><td></td></tr></tbody></table>
+      <div class="foot"><div class="sign"><b>Người lập bảng</b><br><br><br>________________</div><div class="sign"><b>Chủ cửa hàng duyệt</b><br><br><br>________________</div></div></div>`;
+    openPrintDocument(`RUMI - Bảng lương ${state.month}`, body, {landscape:true});
   }
 
   /* ------------------------------------------------------------------
@@ -702,8 +780,9 @@ window.RumiV5 = (() => {
     const root = document.createElement('div');
     root.id = 'v5-command-root';
     root.className = 'v5-command-backdrop';
-    root.innerHTML = `<section class="v5-command" onclick="event.stopPropagation()"><div class="v5-command-search">${icons.search}<input id="v5-command-input" placeholder="Tìm trang, nhân viên, nguyên liệu, ca làm..." autocomplete="off"><span class="v5-shortcut">ESC</span></div><div id="v5-command-results" class="v5-command-results"><div class="v5-command-empty">Đang tải dữ liệu tìm kiếm…</div></div></section>`;
+    root.innerHTML = `<section class="v5-command"><div class="v5-command-search">${icons.search}<input id="v5-command-input" placeholder="Tìm trang, nhân viên, nguyên liệu, ca làm..." autocomplete="off"><span class="v5-shortcut">ESC</span></div><div id="v5-command-results" class="v5-command-results"><div class="v5-command-empty">Đang tải dữ liệu tìm kiếm…</div></div></section>`;
     root.addEventListener('click', closeCommand);
+    root.querySelector('.v5-command')?.addEventListener('click', (event) => event.stopPropagation());
     document.body.appendChild(root);
     const input = document.querySelector('#v5-command-input');
     input.focus();
@@ -800,6 +879,19 @@ window.RumiV5 = (() => {
       if (action === 'command') return openCommand();
       if (action === 'refresh') return navigate(state.page);
       if (action === 'export') return exportData(button.dataset.export);
+      if (action === 'attendance-remind') {
+        await api('/api/attendance/alerts/remind', {method:'POST', body:{id:Number(button.dataset.id)}});
+        toast('Đã gửi nhắc nhở cho nhân viên');
+        return navigate(state.page);
+      }
+      if (action === 'attendance-resolve') {
+        const mode = button.dataset.mode || 'dismiss';
+        const label = mode === 'absent' ? 'xác nhận nhân viên vắng ca' : 'đóng cảnh báo này';
+        if (!confirm(`Bạn muốn ${label}?`)) return;
+        await api('/api/attendance/alerts/resolve', {method:'POST', body:{id:Number(button.dataset.id), action:mode}});
+        toast(mode === 'absent' ? 'Đã xác nhận vắng ca' : 'Đã đóng cảnh báo');
+        return navigate(state.page);
+      }
       if (action === 'schedule-xlsx') {
         button.disabled = true;
         const original = button.innerHTML;
@@ -831,6 +923,13 @@ window.RumiV5 = (() => {
         await api('/api/payroll/unlock', {method:'POST', body:{month:state.month}}); toast('Đã mở khóa bảng lương'); return renderPayroll().then(afterRender);
       }
       if (action === 'payroll-slip') return printPayslip(button.dataset.id);
+      if (action === 'payroll-pdf') {
+        if (state.user.role === 'employee') {
+          const own = (state.cache.payroll || [])[0];
+          return own ? printPayslip(own.employee_id) : toast('Chưa có phiếu lương', 'error');
+        }
+        return printPayrollReport();
+      }
       if (action === 'week') {
         const scope = button.dataset.scope;
         const key = scope === 'schedule' ? 'scheduleWeekStart' : 'myWeekStart';

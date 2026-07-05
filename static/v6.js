@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const VERSION = '6.1.0';
+  const VERSION = '6.2.0';
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   let renderTimer = 0;
   let requestCount = 0;
@@ -279,7 +279,7 @@
   }
 
   function updateVersionLabels() {
-    document.title = 'RUMI Manager 6.0 — Premium Motion Experience';
+    document.title = 'RUMI Manager 6.2 — Attendance Alerts & Payroll PDF';
     document.querySelectorAll('.v5-version').forEach((node) => { node.textContent = `V${VERSION}`; });
     const chip = document.querySelector('.store-chip');
     if (chip && !chip.querySelector('.v6-version')) {
@@ -289,6 +289,30 @@
       badge.style.cssText = 'margin-left:auto;padding:4px 7px;border-radius:99px;background:rgba(255,255,255,.08);color:#efc9a8;font-size:7px;font-weight:900;letter-spacing:.1em';
       chip.appendChild(badge);
     }
+  }
+
+  let attendanceFingerprint = '';
+  async function pollAttendanceAlerts() {
+    if (typeof state === 'undefined' || !state.user || document.hidden || typeof api !== 'function') return;
+    try {
+      const rows = await api('/api/attendance/alerts');
+      const fingerprint = (rows || []).map((x) => `${x.id}:${x.status}:${x.minutes_late}`).join('|');
+      if (!attendanceFingerprint) {
+        attendanceFingerprint = fingerprint;
+        return;
+      }
+      if (fingerprint !== attendanceFingerprint) {
+        attendanceFingerprint = fingerprint;
+        if (rows?.length) if (typeof toast === 'function') toast(`Có ${rows.length} cảnh báo chấm công cần chú ý`, rows.some((x) => x.severity === 'danger') ? 'error' : 'warning');
+        if (['dashboard','attendance'].includes(state.page) && typeof navigate === 'function') navigate(state.page);
+      }
+    } catch {}
+  }
+
+  function setupAttendancePolling() {
+    window.setTimeout(pollAttendanceAlerts, 15000);
+    window.setInterval(pollAttendanceAlerts, 60000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pollAttendanceAlerts(); });
   }
 
   function init() {
@@ -301,6 +325,7 @@
     observeUI();
     enhancePage();
     updateVersionLabels();
+    setupAttendancePolling();
     document.addEventListener('click', ripple);
     document.documentElement.classList.add('rumi-v6-ready');
   }

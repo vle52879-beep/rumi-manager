@@ -70,7 +70,7 @@
       ]
     },
     {
-      "source": "/(app.js|v5.js|v54.js|v55.js|v6.js|styles.css|v5.css|v54.css|v55.css|v6.css|landing-v6.css|landing-v6.js|icon.svg|huong-dan-rumi.pdf)",
+      "source": "/(app.js|v5.js|v54.js|v55.js|v6.js|styles.css|v5.css|v54.css|v55.css|v6.css|v62.css|landing-v6.css|landing-v6.js|icon.svg|huong-dan-rumi.pdf)",
       "headers": [
         {
           "key": "Cache-Control",

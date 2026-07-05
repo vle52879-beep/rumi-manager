@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Offline checks for security, scheduling, payroll metrics and Excel export."""
 from io import BytesIO
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from zipfile import ZipFile
 
 from excel_export import build_schedule_week_xlsx
-from server import PASSWORD_ITERATIONS, RumiHandler, attendance_metrics, calculate_hours, make_session, overlaps, parse_session, password_hash, validate_password_policy, verify_password
+from server import PASSWORD_ITERATIONS, RumiHandler, attendance_metrics, calculate_hours, classify_shift_attendance, make_session, overlaps, parse_session, password_hash, validate_password_policy, verify_password
 
 
 def main():
@@ -28,6 +30,15 @@ def main():
     approved = attendance_metrics({"start_time":"08:00","end_time":"12:00"}, "07:50", "12:10", approve_overtime=True)
     assert approved["base_payable_minutes"] == 240
     assert approved["payable_minutes"] == 250
+
+    sample_shift = {"shift_date":"2026-07-05","start_time":"08:00","end_time":"16:00"}
+    tz = ZoneInfo("Asia/Ho_Chi_Minh")
+    assert classify_shift_attendance(sample_shift, None, {}, datetime(2026,7,5,8,3,tzinfo=tz))["status"] == "Đến giờ chấm công"
+    assert classify_shift_attendance(sample_shift, None, {}, datetime(2026,7,5,8,18,tzinfo=tz))["status"] == "Đi trễ chưa chấm"
+    assert classify_shift_attendance(sample_shift, None, {}, datetime(2026,7,5,9,0,tzinfo=tz))["status"] == "Nguy cơ vắng ca"
+    assert classify_shift_attendance(sample_shift, None, {}, datetime(2026,7,5,16,1,tzinfo=tz))["status"] == "Vắng ca"
+    assert classify_shift_attendance(sample_shift, {"check_in":"08:02"}, {}, datetime(2026,7,5,16,30,tzinfo=tz))["status"] == "Đến giờ chấm ra"
+    assert classify_shift_attendance(sample_shift, {"check_in":"08:02"}, {"checkout_after_minutes":5}, datetime(2026,7,5,16,6,tzinfo=tz))["status"] == "Thiếu giờ ra"
 
     # Official shifts must remain visible in payroll even before attendance exists.
     future_payroll = RumiHandler.payroll_from_rows(
@@ -77,6 +88,7 @@ def main():
     print("✓ Kiểm tra trùng ca")
     print("✓ Tính giờ lương theo khung ca; tăng ca phải duyệt")
     print("✓ Ca chính thức vẫn hiện trong bảng lương trước khi chấm công")
+    print("✓ Cảnh báo đến giờ, đi trễ, nguy cơ vắng, vắng ca và thiếu giờ ra")
     print("✓ Luật Full-time 6 ngày làm + 1 ngày nghỉ")
     print("✓ Xuất lịch tuần Excel 2 sheet")
     print("Self-test hoàn tất.")

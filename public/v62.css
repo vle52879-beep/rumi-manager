@@ -1,0 +1,19 @@
+/* RUMI 6.2 - real-time attendance alert UI */
+.v62-alert-panel{overflow:hidden;border-color:rgba(168,71,62,.22)!important;background:linear-gradient(145deg,rgba(255,253,250,.96),rgba(255,244,235,.92))!important}
+.v62-alert-list{display:grid;gap:12px}
+.v62-attendance-alert{position:relative;display:flex;align-items:center;gap:14px;padding:15px 16px;border:1px solid rgba(139,78,52,.14);border-radius:18px;background:rgba(255,255,255,.82);box-shadow:0 12px 32px rgba(73,45,31,.07);overflow:hidden;transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}
+.v62-attendance-alert:hover{transform:translateY(-2px);box-shadow:0 16px 40px rgba(73,45,31,.11)}
+.v62-attendance-alert.info{border-color:rgba(71,119,165,.28);background:linear-gradient(135deg,#fff,#edf5fd)}
+.v62-attendance-alert.warning{border-color:rgba(183,120,40,.32);background:linear-gradient(135deg,#fff,#fff6df)}
+.v62-attendance-alert.danger{border-color:rgba(168,71,62,.34);background:linear-gradient(135deg,#fff,#fde9e4)}
+.v62-alert-pulse{flex:0 0 13px;width:13px;height:13px;border-radius:50%;background:#4777a5;box-shadow:0 0 0 0 rgba(71,119,165,.35);animation:v62-pulse 1.8s infinite}
+.v62-attendance-alert.warning .v62-alert-pulse{background:#b77828;box-shadow:0 0 0 0 rgba(183,120,40,.35)}
+.v62-attendance-alert.danger .v62-alert-pulse{background:#a8473e;box-shadow:0 0 0 0 rgba(168,71,62,.38)}
+.v62-alert-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.v62-alert-copy strong{font-size:15px;color:#38261f}
+.v62-alert-copy span{font-size:13px;color:#6f6058;white-space:normal}
+.v62-alert-copy small{font-size:12px;font-weight:700;color:#a8473e}
+.v62-alert-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+@keyframes v62-pulse{0%{box-shadow:0 0 0 0 currentColor}65%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}
+@media(max-width:800px){.v62-attendance-alert{align-items:flex-start;flex-wrap:wrap}.v62-alert-actions{width:100%;justify-content:flex-start;padding-left:27px}.v62-alert-actions .btn{flex:1;min-width:120px}}
+@media(prefers-reduced-motion:reduce){.v62-alert-pulse{animation:none}.v62-attendance-alert{transition:none}}
