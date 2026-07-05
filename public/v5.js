@@ -824,8 +824,8 @@ window.RumiV5 = (() => {
   const legacyNavigate = navigate;
   navigate = async function navigateV5(page) {
     if (state.user) {
-      sessionStorage.setItem('rumi-last-page', page);
-      history.replaceState(null, '', `/#${page}`);
+      try { sessionStorage.setItem('rumi-last-page', page); } catch (_) {}
+      try { history.replaceState(null, '', `/#${page}`); } catch (_) {}
     }
     const result = await legacyNavigate(page);
     afterRender();
@@ -833,10 +833,13 @@ window.RumiV5 = (() => {
   };
 
   const legacyEnterApp = enterApp;
-  enterApp = function enterAppV5(user) {
-    legacyEnterApp(user);
+  enterApp = function enterAppV5(user, dashboard = null, unreadCount = null) {
+    // Preserve the bootstrap payload. Dropping these arguments forced an
+    // unnecessary second dashboard request and temporarily showed stale counts.
+    legacyEnterApp(user, dashboard, unreadCount);
     window.setTimeout(() => {
-      const remembered = sessionStorage.getItem('rumi-last-page');
+      let remembered = null;
+      try { remembered = sessionStorage.getItem('rumi-last-page'); } catch (_) {}
       const allowed = (user.role === 'admin' ? navAdmin : navEmployee).some((item) => item[1] === remembered);
       if (allowed && remembered !== state.page) navigate(remembered);
       afterRender();

@@ -14,6 +14,28 @@
   const iso642 = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
   const time642 = (value) => String(value || '').slice(0, 5);
 
+  // v5 keeps these rendering helpers private inside its module. Keep the
+  // v6.4.2 hotfix self-contained so later enhancement files never depend on
+  // another module's lexical scope.
+  const pageNode642 = () => document.querySelector('#page');
+  const summaryItem642 = (label, value, note = '') => `
+    <div class="v5-summary-item">
+      <span>${esc(label)}</span><strong>${value}</strong><small>${esc(note)}</small>
+    </div>`;
+  const filterToolbar642 = (content) => `<div class="toolbar"><div class="v5-filter-row">${content}</div></div>`;
+  const exportButton642 = (kind, label = 'Xuất CSV') => `<button class="btn secondary" data-v5-action="export" data-export="${esc(kind)}">
+    <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"/></svg>${esc(label)}</button>`;
+
+  const missingDependencies642 = [
+    ['api', typeof api], ['state', typeof state], ['renderNotifications', typeof renderNotifications],
+    ['renderInventory', typeof renderInventory], ['renderSchedule', typeof renderSchedule], ['handleForm', typeof handleForm],
+  ].filter(([, type]) => type === 'undefined').map(([name]) => name);
+  if (missingDependencies642.length) {
+    console.error(`RUMI 6.4.2 không thể khởi tạo: thiếu ${missingDependencies642.join(', ')}`);
+    window.RumiV642 = { version: VERSION, ready: false, missing: missingDependencies642 };
+    return;
+  }
+
   function selectedIds(selector) {
     return [...document.querySelectorAll(selector)].filter((x) => x.checked).map((x) => Number(x.value)).filter(Boolean);
   }
@@ -38,15 +60,17 @@
     state.cache.notifications = rows;
     const unread = rows.filter((x) => !x.read_at).length;
     const admin = state.user.role === 'admin';
-    pageNode().innerHTML = `
+    const page = pageNode642();
+    if (!page) return;
+    page.innerHTML = `
       ${intro('TRUNG TÂM THÔNG BÁO', 'Cập nhật mới nhất', 'Hiển thị toàn bộ thông báo, không còn giới hạn 100 mục.', `<div class="actions"><button class="btn secondary" data-action="notifications-read-all">${icons.check} Đánh dấu tất cả đã đọc</button>${admin ? `<button class="btn danger" data-v642-action="delete-notifications" disabled>${icons.trash} Xóa đã chọn</button>` : ''}</div>`)}
       <section class="v5-summary-strip">
-        ${summaryItem('Tổng thông báo', rows.length, 'Không giới hạn 100 mục')}
-        ${summaryItem('Chưa đọc', unread, unread ? 'Cần kiểm tra' : 'Đã đọc hết')}
-        ${summaryItem('Đã đọc', rows.length - unread, 'Lịch sử')}
-        ${summaryItem('Mới nhất', rows[0] ? dateTimeVN(rows[0].created_at) : '—', 'Thời điểm cập nhật')}
+        ${summaryItem642('Tổng thông báo', rows.length, 'Không giới hạn 100 mục')}
+        ${summaryItem642('Chưa đọc', unread, unread ? 'Cần kiểm tra' : 'Đã đọc hết')}
+        ${summaryItem642('Đã đọc', rows.length - unread, 'Lịch sử')}
+        ${summaryItem642('Mới nhất', rows[0] ? dateTimeVN(rows[0].created_at) : '—', 'Thời điểm cập nhật')}
       </section>
-      ${filterToolbar(`<div class="search-box">${icons.search}<input id="v5-notification-search" placeholder="Tìm nội dung thông báo..."></div><select id="v5-notification-status"><option value="">Tất cả</option><option value="unread">Chưa đọc</option><option value="read">Đã đọc</option></select>${admin ? `<label class="v642-select-all"><input type="checkbox" data-v642-notification-all><span>Chọn tất cả đang hiển thị</span></label><span data-v642-notification-selected class="v5-filter-count">Chưa chọn</span>` : ''}<span id="v5-notification-count" class="v5-filter-count">${rows.length} thông báo</span>`)}
+      ${filterToolbar642(`<div class="search-box">${icons.search}<input id="v5-notification-search" placeholder="Tìm nội dung thông báo..."></div><select id="v5-notification-status"><option value="">Tất cả</option><option value="unread">Chưa đọc</option><option value="read">Đã đọc</option></select>${admin ? `<label class="v642-select-all"><input type="checkbox" data-v642-notification-all><span>Chọn tất cả đang hiển thị</span></label><span data-v642-notification-selected class="v5-filter-count">Chưa chọn</span>` : ''}<span id="v5-notification-count" class="v5-filter-count">${rows.length} thông báo</span>`)}
       <div class="card"><div class="card-body"><div id="v5-notification-list" class="list v642-selectable-list">
         ${rows.map((x) => `<div class="list-row v642-selectable-row" data-v642-notification-row data-search="${esc(normalize642(`${x.title} ${x.message}`))}" data-read="${x.read_at ? 'read' : 'unread'}">
           ${admin ? `<label class="v642-check"><input type="checkbox" value="${x.id}" data-v642-notification-check aria-label="Chọn thông báo"></label>` : ''}
@@ -66,7 +90,7 @@
     const withdrawals = state.cache.withdrawals || [];
     const card = [...document.querySelectorAll('.card')].find((node) => node.querySelector('h3')?.textContent?.includes('Lịch sử lấy nguyên liệu'));
     if (!card) return;
-    card.innerHTML = `<div class="card-head"><div><h3>Lịch sử lấy nguyên liệu</h3><p>${withdrawals.length} lượt đang hiển thị</p></div><div class="actions"><label class="v642-select-all"><input type="checkbox" data-v642-withdrawal-all><span>Chọn tất cả</span></label><button class="btn small danger" data-v642-action="delete-withdrawals" disabled>${icons.trash} Xóa lịch sử đã chọn</button>${exportButton('withdrawals', 'Xuất lịch sử')}</div></div>
+    card.innerHTML = `<div class="card-head"><div><h3>Lịch sử lấy nguyên liệu</h3><p>${withdrawals.length} lượt đang hiển thị</p></div><div class="actions"><label class="v642-select-all"><input type="checkbox" data-v642-withdrawal-all><span>Chọn tất cả</span></label><button class="btn small danger" data-v642-action="delete-withdrawals" disabled>${icons.trash} Xóa lịch sử đã chọn</button>${exportButton642('withdrawals', 'Xuất lịch sử')}</div></div>
       <div class="card-body"><div class="v642-history-note">Xóa lịch sử chỉ ẩn bản ghi khỏi giao diện, <strong>không cộng lại tồn kho</strong>. Thao tác vẫn được lưu trong nhật ký quản trị.</div>
       ${withdrawals.length ? `<div class="list v642-selectable-list">${withdrawals.map((x) => `<div class="list-row v642-selectable-row" data-v642-withdrawal-row><label class="v642-check"><input type="checkbox" value="${x.id}" data-v642-withdrawal-check aria-label="Chọn lịch sử lấy hàng"></label><span class="list-icon">${icons.box}</span><div class="list-copy"><strong>${esc(x.item_name)} · ${number(x.quantity, 2)} ${esc(x.unit)}</strong><span>${dateVN(x.taken_at)} · ${esc(x.employee_name || 'Quản lý')} · ${esc(x.note || 'Không ghi chú')}</span></div></div>`).join('')}</div>` : empty('Chưa có lượt lấy hàng', 'Mỗi lần lấy nguyên liệu sẽ được lưu lại.', 'box')}</div>`;
     updateWithdrawalSelection();
@@ -187,5 +211,5 @@
     }
   });
 
-  window.RumiV642 = { version: VERSION, maxWeeklyHours: 56, bulkNotificationDelete: true, inventoryHistoryArchive: true, registeredApplicantReassignment: true };
+  window.RumiV642 = { version: VERSION, ready: true, maxWeeklyHours: 56, bulkNotificationDelete: true, inventoryHistoryArchive: true, registeredApplicantReassignment: true };
 })();
