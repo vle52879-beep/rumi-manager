@@ -4,7 +4,7 @@
    keeps all business rules on the Python/PostgreSQL backend. */
 
 window.RumiV5 = (() => {
-  const VERSION = '6.2.0';
+  const VERSION = '6.4.0';
   const pageNode = () => document.querySelector('#page');
   const localISO = (date) => {
     const d = new Date(date);

@@ -1,15 +1,15 @@
-# Deploy RUMI 6.2 lên Vercel
+# Triển khai RUMI 6.4 lên Vercel
 
-## 1. Chạy migration
+## 1. Chạy SQL v6.4
 
 ```bash
-cd ~/Downloads/RUMI-Manager-Supabase-v6.2-ATTENDANCE-PDF
-pbcopy < sql/SUPABASE_RUMI_V6_2_ATTENDANCE_ALERTS.sql
+cd ~/Downloads/RUMI-Manager-Supabase-v6.4-WEEKLY-SHIFT-REGISTRATION
+pbcopy < sql/SUPABASE_RUMI_V6_4_WEEKLY_REGISTRATION.sql
 ```
 
-Mở Supabase → SQL Editor → New query → dán → Run.
+Dán vào **Supabase SQL Editor** và nhấn **Run**.
 
-## 2. Ghi đè mã nguồn và push
+## 2. Ghi đè mã nguồn dự án đang kết nối Vercel
 
 ```bash
 cd ~/Downloads
@@ -17,28 +17,22 @@ cd ~/Downloads
 rsync -av --delete \
   --exclude='.git' \
   --exclude='.env' \
-  RUMI-Manager-Supabase-v6.2-ATTENDANCE-PDF/ \
+  RUMI-Manager-Supabase-v6.4-WEEKLY-SHIFT-REGISTRATION/ \
   RUMI-Manager-Supabase-v4.4-Vercel/
 
 cd ~/Downloads/RUMI-Manager-Supabase-v4.4-Vercel
 
 git add -A
-git commit -m "Upgrade RUMI 6.2 attendance alerts and payroll PDF"
+git commit -m "Upgrade RUMI 6.4 weekly shift registration"
 git push
 ```
 
-Chờ Vercel báo **Ready** rồi nhấn `Command + Shift + R`.
-
 ## 3. Kiểm tra
+
+Chờ Vercel báo **Ready**, sau đó mở:
 
 ```text
 https://rumi-manager-test.vercel.app/api/health
 ```
 
-Kết quả cần có `"version":"6.2.0"`, `"attendance_alerts":true` và `"payroll_pdf":true`.
-
-## 4. Xuất PDF lương
-
-- Admin: **Bảng lương → Xuất PDF bảng lương**.
-- Từng nhân viên: **Phiếu lương → Xuất PDF phiếu lương**.
-- Trong hộp thoại in của trình duyệt, chọn **Save as PDF / Lưu dưới dạng PDF**.
+Sau đó tải lại mạnh bằng **Command + Shift + R**.

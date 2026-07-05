@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RUMI Manager v6.2 ATTENDANCE ALERTS & PDF — fixed admin account, employee CRUD, roles, scheduling and GPS.
+"""RUMI Manager v6.4 WEEKLY SHIFT REGISTRATION — fixed admin account, employee CRUD, roles, scheduling and GPS.
 
 Python standard library only. The Supabase secret key stays in this backend and
 is never sent to the browser. Every database object used by this app starts
@@ -100,6 +100,8 @@ TABLES = {
     "openings": "rumi_shift_openings",
     "applications": "rumi_shift_applications",
     "day_offs": "rumi_weekly_day_off_requests",
+    "weekly_requests": "rumi_weekly_shift_requests",
+    "weekly_request_items": "rumi_weekly_shift_request_items",
     "leaves": "rumi_leave_requests",
     "shift_changes": "rumi_shift_change_requests",
     "shifts": "rumi_shifts",
@@ -454,6 +456,8 @@ class SupabaseREST:
         text = str(message or "Lỗi cơ sở dữ liệu")
         lowered = text.lower()
         if code == "42P01" or "could not find the table" in lowered or ("relation" in lowered and "does not exist" in lowered):
+            if "weekly_shift_requests" in lowered or "weekly_shift_request_items" in lowered or "weekly_request_id" in lowered:
+                return "Chưa nâng cấp RUMI v6.4. Hãy chạy sql/SUPABASE_RUMI_V6_4_WEEKLY_REGISTRATION.sql trong Supabase."
             if "shift_attendance_alerts" in lowered or "attendance_warning_minutes" in lowered:
                 return "Chưa nâng cấp RUMI v6.2. Hãy chạy sql/SUPABASE_RUMI_V6_2_ATTENDANCE_ALERTS.sql trong Supabase."
             if any(name in lowered for name in ("auth_sessions", "password_history", "login_throttles", "attendance_events", "attendance_correction")):
@@ -466,6 +470,8 @@ class SupabaseREST:
                 return "Chưa nâng cấp RUMI v5.3. Hãy chạy sql/SUPABASE_RUMI_V5_3_OPERATIONS.sql trong Supabase."
             return "Chưa tạo đủ bảng RUMI. Hãy chạy SQL v4, v5.3 rồi v5.4 theo đúng thứ tự."
         if "could not find the function" in lowered:
+            if "submit_weekly_shift_request" in lowered or "refresh_weekly_shift_request" in lowered:
+                return "Chưa tạo hàm đăng ký tuần RUMI v6.4. Hãy chạy sql/SUPABASE_RUMI_V6_4_WEEKLY_REGISTRATION.sql trong Supabase."
             if "v55" in lowered or "auth_register_failure" in lowered or "auth_clear_failures" in lowered:
                 return "Chưa tạo hàm bảo mật/chấm công RUMI v5.5. Hãy chạy lại SQL v5.5 trong Supabase."
             return "Chưa tạo hàm nghiệp vụ RUMI. Hãy chạy các file SQL nâng cấp theo đúng thứ tự."
@@ -1343,8 +1349,66 @@ class RumiHandler(BaseHTTPRequestHandler):
             "target_hours": target_hours,
         }
 
+    def weekly_request_rows(self, user: dict, requests: list[dict], items: list[dict], openings: list[dict],
+                            employees: list[dict], locations: list[dict], applications: list[dict],
+                            shifts: list[dict]) -> list[dict]:
+        """Group the seven-day registration into one transparent request per employee."""
+        e_map = employee_map(employees)
+        l_map = location_map(locations)
+        opening_map = {integer(x.get("id")): x for x in openings}
+        application_map = {integer(x.get("id")): x for x in applications}
+        shift_map = {integer(x.get("id")): x for x in shifts}
+        grouped: dict[int, list[dict]] = defaultdict(list)
+        for raw in items:
+            item = dict(raw)
+            opening = opening_map.get(integer(item.get("opening_id")), {})
+            application = application_map.get(integer(item.get("application_id")), {})
+            shift = shift_map.get(integer(item.get("shift_id")), {})
+            item.update({
+                "opening_status": opening.get("status"),
+                "required_count": opening.get("required_count"),
+                "opening_note": opening.get("note"),
+                "application_status": application.get("status") or item.get("status"),
+                "application_id": application.get("id") or item.get("application_id"),
+                "shift_id": shift.get("id") or item.get("shift_id"),
+            })
+            grouped[integer(item.get("request_id"))].append(item)
+
+        output = []
+        for raw in requests:
+            row = dict(raw)
+            employee = e_map.get(integer(row.get("employee_id")), {})
+            location = l_map.get(integer(row.get("location_id")), {})
+            request_items = sorted(grouped.get(integer(row.get("id")), []), key=lambda x: (str(x.get("work_date")), str(x.get("start_time"))))
+            counts = defaultdict(int)
+            for item in request_items:
+                counts[str(item.get("status") or "Chờ duyệt")] += 1
+            row.update({
+                "employee_name": employee.get("name"),
+                "employee_code": employee.get("code"),
+                "employee_role": employee.get("role"),
+                "employment_type": employee.get("employment_type", "Part-time"),
+                "weekly_target_hours": employee.get("weekly_target_hours"),
+                "max_weekly_hours": employee.get("max_weekly_hours"),
+                "location_name": location.get("name"),
+                "location_address": location.get("address"),
+                "items": request_items,
+                "pending_days": counts["Chờ duyệt"],
+                "approved_days": counts["Đã duyệt"],
+                "waitlist_days": counts["Danh sách chờ"],
+                "rejected_days": counts["Từ chối"],
+                "withdrawn_days": counts["Đã rút"],
+                "can_edit": counts["Đã duyệt"] == 0 and row.get("status") not in {"Đã rút"},
+            })
+            output.append(row)
+        output.sort(key=lambda x: (0 if x.get("status") == "Chờ duyệt" else 1, str(x.get("employee_name") or "")))
+        return output
+
     def shift_market_page(self, user: dict, start: str, end: str) -> dict:
         opening_filters = {"work_date": f"gte.{start}", "and": f"(work_date.lte.{end})"}
+        request_filters = {"week_start": f"eq.{monday_of(start).isoformat()}"}
+        if user.get("role") == "employee":
+            request_filters["employee_id"] = f"eq.{integer(user.get('employee_id'))}"
         data = parallel_calls(
             openings=lambda: SB.select(TABLES["openings"], filters=opening_filters, order="work_date.asc,start_time.asc"),
             employees=lambda: SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, order="name.asc"),
@@ -1352,9 +1416,11 @@ class RumiHandler(BaseHTTPRequestHandler):
             shifts=lambda: SB.select(TABLES["shifts"], filters={"shift_date": f"gte.{start}", "and": f"(shift_date.lte.{end})"}, order="shift_date.asc,start_time.asc"),
             leaves=lambda: SB.select(TABLES["leaves"], filters={"status": "eq.Đã duyệt", "start_date": f"lte.{end}", "and": f"(end_date.gte.{start})"}),
             day_offs=lambda: SB.select(TABLES["day_offs"], filters={"week_start": f"gte.{monday_of(start).isoformat()}", "and": f"(week_start.lte.{monday_of(end).isoformat()})"}, order="week_start.asc"),
+            weekly_requests=lambda: SB.select(TABLES["weekly_requests"], filters=request_filters, order="submitted_at.asc"),
         )
         openings = data["openings"]
         applications = SB.select_in(TABLES["applications"], "opening_id", [x.get("id") for x in openings], order="applied_at.asc")
+        weekly_items = SB.select_in(TABLES["weekly_request_items"], "request_id", [x.get("id") for x in data["weekly_requests"]], order="work_date.asc,start_time.asc")
         e_map = employee_map(data["employees"])
         l_map = location_map(data["locations"])
         apps_by_opening: dict[int, list[dict]] = defaultdict(list)
@@ -1406,10 +1472,16 @@ class RumiHandler(BaseHTTPRequestHandler):
         own_day_offs = data["day_offs"] if user.get("role") == "admin" else [x for x in data["day_offs"] if integer(x.get("employee_id")) == integer(user.get("employee_id"))]
         if user.get("role") == "admin":
             own_day_offs = add_people(own_day_offs, data["employees"])
+        weekly_requests = self.weekly_request_rows(
+            user, data["weekly_requests"], weekly_items, openings,
+            data["employees"], data["locations"], applications, data["shifts"]
+        )
         return {
             "openings": output, "locations": data["locations"],
             "employees": data["employees"] if user.get("role") == "admin" else [],
             "day_offs": own_day_offs, "compliance": compliance,
+            "weekly_requests": weekly_requests,
+            "weekly_request": weekly_requests[0] if user.get("role") == "employee" and weekly_requests else None,
             "shifts": self.enriched_shifts(data["shifts"], employees=data["employees"], locations=data["locations"]),
         }
 
@@ -2111,8 +2183,10 @@ class RumiHandler(BaseHTTPRequestHandler):
                 auth_sessions=lambda: SB.select(TABLES["auth_sessions"], limit=1, columns="id"),
                 attendance_events=lambda: SB.select(TABLES["attendance_events"], limit=1, columns="id"),
                 attendance_alerts=lambda: SB.select(TABLES["attendance_alerts"], limit=1, columns="id"),
+                weekly_requests=lambda: SB.select(TABLES["weekly_requests"], limit=1, columns="id"),
+                weekly_request_items=lambda: SB.select(TABLES["weekly_request_items"], limit=1, columns="id"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.2.0", "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.0", "weekly_shift_registration": True, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -2681,6 +2755,258 @@ class RumiHandler(BaseHTTPRequestHandler):
             row = SB.insert(TABLES["locations"], {"name": name, "address": str(body.get("address", "")).strip(), "latitude": lat, "longitude": lng, "radius_m": radius, "active": True})
             self.audit(user, "create", "location", row["id"], {"name": name})
             return self.ok(row, "Đã thêm vị trí cửa hàng")
+
+        if path == "/api/shift-market/weekly-openings":
+            self.require_role(user, "admin")
+            week_start_text = parse_date(body.get("week_start"), "Tuần")
+            week_start = datetime.strptime(week_start_text, "%Y-%m-%d").date()
+            if week_start.weekday() != 0:
+                raise APIError("Ngày đầu tuần phải là Thứ Hai")
+            if week_start < monday_of(today_text()):
+                raise APIError("Không thể đăng lịch cho tuần đã qua")
+            location_id = integer(body.get("location_id"))
+            morning_count = max(0, min(integer(body.get("morning_count"), 1), 50))
+            evening_count = max(0, min(integer(body.get("evening_count"), 1), 50))
+            if morning_count == 0 and evening_count == 0:
+                raise APIError("Phải mở ít nhất một ca trong tuần")
+            status = str(body.get("status") or "Mở đăng ký")
+            eligible = str(body.get("eligible_employment_type") or "Tất cả")
+            if status not in {"Nháp", "Mở đăng ký"} or eligible not in {"Tất cả", "Full-time", "Part-time"}:
+                raise APIError("Trạng thái hoặc loại nhân viên không hợp lệ")
+            locations = SB.select(TABLES["locations"], filters={"id": f"eq.{location_id}", "active": "eq.true"}, limit=1)
+            if not locations:
+                raise APIError("Cửa hàng không tồn tại hoặc đã tắt")
+            raw_days = body.get("days")
+            days = sorted({integer(x, -1) for x in raw_days}) if isinstance(raw_days, list) else list(range(7))
+            if not days or any(x < 0 or x > 6 for x in days):
+                raise APIError("Ngày mở ca không hợp lệ")
+            deadline = str(body.get("application_deadline") or "").strip() or None
+            if deadline:
+                try:
+                    parsed_deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+                    if parsed_deadline.tzinfo is None:
+                        parsed_deadline = parsed_deadline.replace(tzinfo=LOCAL_TZ)
+                    deadline = parsed_deadline.isoformat(timespec="seconds")
+                except ValueError as exc:
+                    raise APIError("Hạn đăng ký không hợp lệ") from exc
+            end_date = week_start + timedelta(days=6)
+            existing = SB.select(TABLES["openings"], filters={
+                "location_id": f"eq.{location_id}",
+                "work_date": f"gte.{week_start.isoformat()}",
+                "and": f"(work_date.lte.{end_date.isoformat()})",
+            })
+            existing_map = {
+                (str(x.get("work_date")), str(x.get("start_time"))[:5], str(x.get("end_time"))[:5]): x
+                for x in existing if x.get("status") != "Đã hủy"
+            }
+            specs = [("09:00", "17:00", morning_count, "Ca ngày"), ("17:00", "23:00", evening_count, "Ca tối")]
+            created, updated, skipped = [], [], []
+            for offset in days:
+                work_date = (week_start + timedelta(days=offset)).isoformat()
+                for start_time, end_time, required_count, label in specs:
+                    if required_count <= 0:
+                        continue
+                    key = (work_date, start_time, end_time)
+                    payload = {
+                        "location_id": location_id, "work_date": work_date,
+                        "start_time": start_time, "end_time": end_time,
+                        "required_role": str(body.get("required_role") or "").strip(),
+                        "required_count": required_count,
+                        "eligible_employment_type": eligible,
+                        "application_deadline": deadline,
+                        "note": str(body.get("note") or f"{label} theo lịch tuần").strip(),
+                        "status": status, "created_by": user["id"],
+                        "published_at": now_iso() if status == "Mở đăng ký" else None,
+                    }
+                    current = existing_map.get(key)
+                    if current and current.get("status") == "Đã chốt":
+                        skipped.append(current)
+                        continue
+                    if current:
+                        rows = SB.update(TABLES["openings"], payload, {"id": f"eq.{current['id']}"})
+                        if rows:
+                            updated.append(rows[0])
+                    else:
+                        created.append(SB.insert(TABLES["openings"], payload))
+            if status == "Mở đăng ký":
+                self.notify_role(
+                    "employee", "RUMI đã mở đăng ký lịch cả tuần",
+                    f"Tuần {week_start.isoformat()} tại {locations[0]['name']} có 2 ca: 09:00–17:00 và 17:00–23:00.",
+                    "schedule", "availability"
+                )
+            self.audit(user, "publish_week", "shift_opening_week", week_start.isoformat(), {
+                "location_id": location_id, "created": len(created), "updated": len(updated), "skipped": len(skipped)
+            })
+            return self.ok({
+                "week_start": week_start.isoformat(), "created": created, "updated": updated,
+                "skipped": skipped, "opening_count": len(created) + len(updated) + len(skipped),
+            }, "Đã đăng lịch tuần gồm ca 09:00–17:00 và 17:00–23:00")
+
+        if path == "/api/shift-market/weekly-requests":
+            self.require_role(user, "employee")
+            week_start_text = parse_date(body.get("week_start"), "Tuần")
+            week_start = datetime.strptime(week_start_text, "%Y-%m-%d").date()
+            if week_start.weekday() != 0:
+                raise APIError("Ngày đầu tuần phải là Thứ Hai")
+            if week_start < monday_of(today_text()):
+                raise APIError("Không thể đăng ký tuần đã qua")
+            opening_ids = [integer(x) for x in (body.get("opening_ids") or []) if integer(x)]
+            if not opening_ids:
+                raise APIError("Hãy chọn ít nhất một ca trong tuần")
+            openings = SB.select_in(TABLES["openings"], "id", opening_ids)
+            if len(openings) != len(set(opening_ids)):
+                raise APIError("Có ca đăng ký không còn tồn tại")
+            openings.sort(key=lambda x: (str(x.get("work_date")), str(x.get("start_time"))))
+            locations = {integer(x.get("location_id")) for x in openings}
+            if len(locations) != 1:
+                raise APIError("Một đơn tuần chỉ được đăng ký tại một cửa hàng")
+            location_id = next(iter(locations))
+            employee = user.get("employee") or {}
+            employment_type = employee.get("employment_type") or "Part-time"
+            selected_dates = {str(x.get("work_date")) for x in openings}
+            if len(selected_dates) != len(openings):
+                raise APIError("Mỗi ngày chỉ được chọn một ca")
+            if employment_type == "Full-time" and len(openings) != 6:
+                raise APIError("Full-time phải chọn đúng 6 ngày làm và nghỉ 1 ngày")
+            if employment_type != "Full-time" and len(openings) < 1:
+                raise APIError("Hãy chọn ít nhất một ngày làm")
+            week_end = week_start + timedelta(days=6)
+            for opening in openings:
+                work_date = datetime.strptime(str(opening.get("work_date")), "%Y-%m-%d").date()
+                times = (str(opening.get("start_time"))[:5], str(opening.get("end_time"))[:5])
+                if not week_start <= work_date <= week_end:
+                    raise APIError("Có ca không thuộc tuần đã chọn")
+                if times not in {("09:00", "17:00"), ("17:00", "23:00")}:
+                    raise APIError("Đơn tuần chỉ hỗ trợ ca 09:00–17:00 và 17:00–23:00")
+                if opening.get("status") != "Mở đăng ký":
+                    raise APIError(f"Ca ngày {opening.get('work_date')} không còn nhận đăng ký")
+                deadline = parse_iso_datetime(opening.get("application_deadline"))
+                if deadline and deadline < utc_now():
+                    raise APIError(f"Ca ngày {opening.get('work_date')} đã hết hạn đăng ký")
+            data = parallel_calls(
+                shifts=lambda: SB.select(TABLES["shifts"], filters={
+                    "shift_date": f"gte.{week_start.isoformat()}",
+                    "and": f"(shift_date.lte.{week_end.isoformat()})",
+                }),
+                leaves=lambda: SB.select(TABLES["leaves"], filters={
+                    "status": "eq.Đã duyệt", "start_date": f"lte.{week_end.isoformat()}",
+                    "and": f"(end_date.gte.{week_start.isoformat()})",
+                }),
+                day_offs=lambda: SB.select(TABLES["day_offs"], filters={"week_start": f"eq.{week_start.isoformat()}"}),
+            )
+            day_offs = [x for x in data["day_offs"] if integer(x.get("employee_id")) != integer(user.get("employee_id"))]
+            simulated = list(data["shifts"])
+            for opening in openings:
+                rule = self.employee_shift_rule(employee, opening, simulated, data["leaves"], day_offs)
+                if not rule["allowed"]:
+                    raise APIError(f"{opening['work_date']} {str(opening['start_time'])[:5]}: {rule['reason']}", 409)
+                simulated.append({
+                    "employee_id": user["employee_id"], "shift_date": opening["work_date"],
+                    "start_time": opening["start_time"], "end_time": opening["end_time"], "status": "Đã xếp",
+                })
+            result = SB.rpc("rumi_submit_weekly_shift_request", {
+                "p_employee_id": user["employee_id"],
+                "p_week_start": week_start.isoformat(),
+                "p_location_id": location_id,
+                "p_employee_note": str(body.get("employee_note") or "").strip(),
+                "p_opening_ids": opening_ids,
+            })
+            self.notify_role(
+                "admin", "Có đơn đăng ký ca cả tuần",
+                f"{employee.get('name')} đã gửi lịch tuần {week_start.isoformat()} gồm {len(opening_ids)} ngày.",
+                "schedule", "requests"
+            )
+            self.audit(user, "submit_weekly", "weekly_shift_request", (result or {}).get("request_id"), {
+                "week_start": week_start.isoformat(), "opening_ids": opening_ids
+            })
+            return self.ok(result or {}, "Đã gửi đơn đăng ký cả tuần để admin duyệt")
+
+        if path == "/api/shift-market/weekly-requests/withdraw":
+            self.require_role(user, "employee")
+            request_id = integer(body.get("id"))
+            rows = SB.select(TABLES["weekly_requests"], filters={
+                "id": f"eq.{request_id}", "employee_id": f"eq.{user['employee_id']}"
+            }, limit=1)
+            if not rows:
+                raise APIError("Không tìm thấy đơn tuần", 404)
+            approved = SB.select(TABLES["weekly_request_items"], filters={
+                "request_id": f"eq.{request_id}", "status": "eq.Đã duyệt"
+            }, limit=1)
+            if approved:
+                raise APIError("Đơn đã được duyệt một phần. Hãy gửi yêu cầu thay ca thay vì rút đơn")
+            SB.update(TABLES["applications"], {
+                "status": "Đã rút", "admin_note": "Nhân viên rút đơn cả tuần",
+                "reviewed_at": None, "reviewed_by": None,
+            }, {"weekly_request_id": f"eq.{request_id}"})
+            SB.update(TABLES["weekly_request_items"], {"status": "Đã rút", "updated_at": now_iso()}, {"request_id": f"eq.{request_id}"})
+            row = SB.update(TABLES["weekly_requests"], {
+                "status": "Đã rút", "updated_at": now_iso(), "reviewed_at": None, "reviewed_by": None,
+            }, {"id": f"eq.{request_id}"})[0]
+            self.audit(user, "withdraw_weekly", "weekly_shift_request", request_id, {})
+            return self.ok(row, "Đã rút đơn đăng ký cả tuần")
+
+        if path == "/api/shift-market/weekly-requests/review":
+            self.require_role(user, "admin")
+            request_id = integer(body.get("id"))
+            action = str(body.get("action") or "")
+            if action not in {"approve_all", "reject_all"}:
+                raise APIError("Thao tác duyệt đơn tuần không hợp lệ")
+            requests = SB.select(TABLES["weekly_requests"], filters={"id": f"eq.{request_id}"}, limit=1)
+            if not requests:
+                raise APIError("Không tìm thấy đơn đăng ký tuần", 404)
+            items = SB.select(TABLES["weekly_request_items"], filters={"request_id": f"eq.{request_id}"}, order="work_date.asc,start_time.asc")
+            if action == "reject_all" and any(x.get("status") == "Đã duyệt" for x in items):
+                raise APIError("Đơn đã có ca được duyệt. Hãy xử lý từng ngày hoặc dùng yêu cầu thay ca")
+            approved_count = 0
+            waitlist_count = 0
+            rejected_count = 0
+            errors = []
+            for item in items:
+                application_id = integer(item.get("application_id"))
+                if not application_id or item.get("status") in {"Đã rút"}:
+                    continue
+                if action == "reject_all":
+                    SB.update(TABLES["applications"], {
+                        "status": "Từ chối", "admin_note": str(body.get("admin_note") or "Từ chối đơn đăng ký cả tuần").strip(),
+                        "reviewed_at": now_iso(), "reviewed_by": user["id"],
+                    }, {"id": f"eq.{application_id}"})
+                    rejected_count += 1
+                    continue
+                if item.get("status") == "Đã duyệt":
+                    approved_count += 1
+                    continue
+                try:
+                    self.approve_shift_application(user, application_id)
+                    approved_count += 1
+                except APIError as exc:
+                    fallback_status = "Danh sách chờ" if exc.status in {400, 409} else "Từ chối"
+                    SB.update(TABLES["applications"], {
+                        "status": fallback_status, "admin_note": str(exc),
+                        "reviewed_at": now_iso(), "reviewed_by": user["id"],
+                    }, {"id": f"eq.{application_id}"})
+                    if fallback_status == "Danh sách chờ":
+                        waitlist_count += 1
+                    else:
+                        rejected_count += 1
+                    errors.append({"work_date": item.get("work_date"), "reason": str(exc), "status": fallback_status})
+            SB.update(TABLES["weekly_requests"], {
+                "admin_note": str(body.get("admin_note") or "").strip(),
+                "reviewed_at": now_iso(), "reviewed_by": user["id"], "updated_at": now_iso(),
+            }, {"id": f"eq.{request_id}"})
+            SB.rpc("rumi_refresh_weekly_shift_request", {"p_request_id": request_id})
+            refreshed = SB.select(TABLES["weekly_requests"], filters={"id": f"eq.{request_id}"}, limit=1)
+            employee_id = integer(requests[0].get("employee_id"))
+            message = "Đơn đăng ký cả tuần đã được duyệt" if action == "approve_all" else "Đơn đăng ký cả tuần đã bị từ chối"
+            self.notify_employee(employee_id, "Kết quả đăng ký lịch tuần", message, "schedule", "availability")
+            self.audit(user, "review_weekly", "weekly_shift_request", request_id, {
+                "action": action, "approved": approved_count, "waitlist": waitlist_count,
+                "rejected": rejected_count, "errors": errors,
+            })
+            return self.ok({
+                "request": refreshed[0] if refreshed else requests[0],
+                "approved_count": approved_count, "waitlist_count": waitlist_count,
+                "rejected_count": rejected_count, "errors": errors,
+            }, "Đã xử lý đơn đăng ký cả tuần")
 
         if path == "/api/shift-market/openings":
             self.require_role(user, "admin")
