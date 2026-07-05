@@ -4,7 +4,7 @@ const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const today = () => new Date().toISOString().slice(0, 10);
 const monthNow = () => new Date().toISOString().slice(0, 7);
-const APP_VERSION = '6.4.1';
+const APP_VERSION = '6.4.2';
 const state = {
   user: null,
   page: 'dashboard',

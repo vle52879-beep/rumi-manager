@@ -74,6 +74,18 @@ def main():
     blocked = RumiHandler.employee_shift_rule(None, employee, {**opening,"work_date":"2026-07-12"}, six_days, [], [])
     assert not blocked["allowed"] and any("nghỉ" in reason for reason in blocked["reasons"])
 
+
+    part_time = {
+        "id": 2, "status": "Đang làm", "role": "Pha chế", "employment_type": "Part-time",
+        "weekly_target_hours": 24, "max_weekly_hours": 56, "max_daily_hours": 14,
+        "max_consecutive_days": 7, "weekly_days_off": 0,
+    }
+    fifty_six_hours = [{"employee_id":2,"shift_date":f"2026-07-{day:02d}","start_time":"09:00","end_time":"17:00","status":"Đã xếp"} for day in range(6,13)]
+    at_cap = RumiHandler.employee_shift_rule(None, part_time, {"work_date":"2026-07-12","start_time":"17:00","end_time":"23:00","required_role":"Pha chế","eligible_employment_type":"Tất cả"}, fifty_six_hours[:-1], [], [], allow_fixed_double=True)
+    assert at_cap["allowed"] and at_cap["projected_week_hours"] == 54
+    over_cap = RumiHandler.employee_shift_rule(None, part_time, {"work_date":"2026-07-12","start_time":"17:00","end_time":"23:00","required_role":"Pha chế","eligible_employment_type":"Tất cả"}, fifty_six_hours, [], [], allow_fixed_double=True)
+    assert not over_cap["allowed"] and any("56 giờ/tuần" in reason for reason in over_cap["reasons"])
+
     workbook = build_schedule_week_xlsx(
         [{
             "employee_id": 1, "employee_code": "NV001", "employee_name": "Nguyễn An",
@@ -117,6 +129,10 @@ def main():
     assert "Full-time phải đăng ký đúng 6 ngày làm" in migration
     migration_641 = (Path(__file__).resolve().parent / "sql" / "SUPABASE_RUMI_V6_4_1_DOUBLE_SHIFT.sql").read_text(encoding="utf-8")
     assert "selected_shifts" in migration_641 and "tối đa 2 ca" in migration_641
+    migration_642 = (Path(__file__).resolve().parent / "sql" / "SUPABASE_RUMI_V6_4_2_ADMIN_CONTROL.sql").read_text(encoding="utf-8")
+    assert "max_weekly_hours between weekly_target_hours and 56" in migration_642
+    assert "deleted_at" in migration_642 and "rumi_shift_reassignments" in migration_642
+    assert "rumi_reassign_shift_to_application" in migration_642
 
     print("✓ PBKDF2-HMAC-SHA256 600.000 vòng và chính sách mật khẩu")
     print("✓ Chữ ký phiên đăng nhập")
@@ -128,6 +144,8 @@ def main():
     print("✓ Xuất lịch tuần Excel 2 sheet")
     print("✓ Đăng ký tuần hiện tại hoặc tuần sau")
     print("✓ Một ngày được chọn 1 hoặc cả 2 ca cố định 09–17 và 17–23")
+    print("✓ Trần 56 giờ/tuần được áp dụng")
+    print("✓ Migration xóa lịch sử mềm và đổi nhân viên theo đơn đăng ký")
     print("Self-test hoàn tất.")
 
 

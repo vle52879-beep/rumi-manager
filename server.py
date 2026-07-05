@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RUMI Manager v6.4 WEEKLY SHIFT REGISTRATION — fixed admin account, employee CRUD, roles, scheduling and GPS.
+"""RUMI Manager v6.4.2 ADMIN CONTROL — fixed admin account, employee CRUD, roles, scheduling and GPS.
 
 Python standard library only. The Supabase secret key stays in this backend and
 is never sent to the browser. Every database object used by this app starts
@@ -121,6 +121,7 @@ TABLES = {
     "attendance_events": "rumi_attendance_events",
     "attendance_corrections": "rumi_attendance_correction_requests",
     "attendance_alerts": "rumi_shift_attendance_alerts",
+    "shift_reassignments": "rumi_shift_reassignments",
 }
 
 
@@ -455,7 +456,11 @@ class SupabaseREST:
     def _friendly_error(message: str, code: str, http_status: int) -> str:
         text = str(message or "Lỗi cơ sở dữ liệu")
         lowered = text.lower()
+        if "deleted_at" in lowered and ("could not find" in lowered or "schema cache" in lowered or code.startswith("PGRST")):
+            return "Chưa nâng cấp RUMI v6.4.2. Hãy chạy sql/SUPABASE_RUMI_V6_4_2_ADMIN_CONTROL.sql trong Supabase."
         if code == "42P01" or "could not find the table" in lowered or ("relation" in lowered and "does not exist" in lowered):
+            if "shift_reassignments" in lowered:
+                return "Chưa nâng cấp RUMI v6.4.2. Hãy chạy sql/SUPABASE_RUMI_V6_4_2_ADMIN_CONTROL.sql trong Supabase."
             if "weekly_shift_requests" in lowered or "weekly_shift_request_items" in lowered or "weekly_request_id" in lowered:
                 return "Chưa nâng cấp RUMI v6.4. Hãy chạy sql/SUPABASE_RUMI_V6_4_WEEKLY_REGISTRATION.sql trong Supabase."
             if "shift_attendance_alerts" in lowered or "attendance_warning_minutes" in lowered:
@@ -470,6 +475,8 @@ class SupabaseREST:
                 return "Chưa nâng cấp RUMI v5.3. Hãy chạy sql/SUPABASE_RUMI_V5_3_OPERATIONS.sql trong Supabase."
             return "Chưa tạo đủ bảng RUMI. Hãy chạy SQL v4, v5.3 rồi v5.4 theo đúng thứ tự."
         if "could not find the function" in lowered:
+            if "reassign_shift_to_application" in lowered:
+                return "Chưa tạo hàm đổi nhân viên RUMI v6.4.2. Hãy chạy SQL v6.4.2 trong Supabase."
             if "submit_weekly_shift_request" in lowered or "refresh_weekly_shift_request" in lowered:
                 return "Chưa tạo hàm đăng ký tuần RUMI v6.4. Hãy chạy sql/SUPABASE_RUMI_V6_4_WEEKLY_REGISTRATION.sql trong Supabase."
             if "v55" in lowered or "auth_register_failure" in lowered or "auth_clear_failures" in lowered:
@@ -489,7 +496,8 @@ class SupabaseREST:
             return "Khóa Supabase không hợp lệ hoặc không đủ quyền. Hãy dùng secret/service_role key ở backend."
         return text
 
-    def select(self, table: str, *, filters: dict | None = None, order: str = "", limit: int | None = None, columns: str = "*") -> list[dict]:
+    def select(self, table: str, *, filters: dict | None = None, order: str = "", limit: int | None = None,
+               offset: int | None = None, columns: str = "*") -> list[dict]:
         params = {"select": columns}
         if filters:
             params.update(filters)
@@ -497,8 +505,24 @@ class SupabaseREST:
             params["order"] = order
         if limit is not None:
             params["limit"] = limit
+        if offset is not None and offset > 0:
+            params["offset"] = offset
         data = self.request("GET", table, params=params)
         return [normalize_row(x) for x in (data or [])]
+
+    def select_all(self, table: str, *, filters: dict | None = None, order: str = "", columns: str = "*",
+                   page_size: int = 500) -> list[dict]:
+        """Read every matching row in pages instead of silently stopping at a UI limit."""
+        rows: list[dict] = []
+        offset = 0
+        page_size = max(50, min(integer(page_size, 500), 1000))
+        while True:
+            chunk = self.select(table, filters=filters, order=order, limit=page_size, offset=offset, columns=columns)
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            offset += len(chunk)
+        return rows
 
     def select_in(self, table: str, column: str, values, *, columns: str = "*", order: str = "") -> list[dict]:
         ids = []
@@ -724,7 +748,7 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/6.4.1"
+    server_version = "RUMI/6.4.2"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -1302,7 +1326,7 @@ class RumiHandler(BaseHTTPRequestHandler):
         employee_role = str(employee.get("role") or "").strip().lower()
         eligible_type = opening.get("eligible_employment_type") or "Tất cả"
         max_daily = num(employee.get("max_daily_hours"), 8)
-        max_weekly = num(employee.get("max_weekly_hours"), 48)
+        max_weekly = min(num(employee.get("max_weekly_hours"), 56), 56)
         target_hours = num(employee.get("weekly_target_hours"), 48 if employment_type == "Full-time" else 24)
         max_consecutive = integer(employee.get("max_consecutive_days"), 6)
         weekly_days_off = integer(employee.get("weekly_days_off"), 1 if employment_type == "Full-time" else 0)
@@ -2050,16 +2074,16 @@ class RumiHandler(BaseHTTPRequestHandler):
             "unread_count": len([x for x in notifications if not x.get("read_at")]),
         }
 
-    def get_notifications(self, user: dict, *, limit: int = 100, unread_only: bool = False) -> list[dict]:
+    def get_notifications(self, user: dict, *, limit: int | None = 100, unread_only: bool = False) -> list[dict]:
         eid = integer(user.get("employee_id"))
         role = str(user.get("role") or "")
         filters = {"audience_role": f"eq.{role}"} if not eid else {"or": f"(employee_id.eq.{eid},audience_role.eq.{role})"}
         if unread_only:
             filters["read_at"] = "is.null"
-        return SB.select(
-            TABLES["notifications"], filters=filters, order="created_at.desc", limit=limit,
-            columns="id,employee_id,audience_role,title,message,type,link,read_at,created_at"
-        )
+        columns = "id,employee_id,audience_role,title,message,type,link,read_at,created_at"
+        if limit is None:
+            return SB.select_all(TABLES["notifications"], filters=filters, order="created_at.desc", columns=columns)
+        return SB.select(TABLES["notifications"], filters=filters, order="created_at.desc", limit=limit, columns=columns)
 
     def build_requests_page(self, user: dict) -> dict:
         employee_mode = user.get("role") == "employee"
@@ -2171,10 +2195,12 @@ class RumiHandler(BaseHTTPRequestHandler):
         return output
 
     def build_inventory_page(self, user: dict) -> dict:
-        employee_filters = {} if user.get("role") == "admin" else {"employee_id": f"eq.{user['employee_id']}"}
+        employee_filters = {"deleted_at": "is.null"}
+        if user.get("role") != "admin":
+            employee_filters["employee_id"] = f"eq.{user['employee_id']}"
         data = parallel_calls(
             items=lambda: SB.select(TABLES["inventory"], order="category.asc,name.asc"),
-            withdrawals=lambda: SB.select(TABLES["withdrawals"], filters=employee_filters, order="taken_at.desc,id.desc", limit=300),
+            withdrawals=lambda: SB.select_all(TABLES["withdrawals"], filters=employee_filters, order="taken_at.desc,id.desc"),
             employees=lambda: SB.select(TABLES["employees"], filters={"status": "eq.Đang làm"}, order="name.asc", columns="id,code,name,role"),
         )
         data["items"].sort(key=lambda x: (0 if num(x.get("quantity")) <= num(x.get("min_stock")) else 1, str(x.get("category")), str(x.get("name"))))
@@ -2202,8 +2228,10 @@ class RumiHandler(BaseHTTPRequestHandler):
                 attendance_alerts=lambda: SB.select(TABLES["attendance_alerts"], limit=1, columns="id"),
                 weekly_requests=lambda: SB.select(TABLES["weekly_requests"], limit=1, columns="id"),
                 weekly_request_items=lambda: SB.select(TABLES["weekly_request_items"], limit=1, columns="id"),
+                shift_reassignments=lambda: SB.select(TABLES["shift_reassignments"], limit=1, columns="id"),
+                withdrawal_archive=lambda: SB.select(TABLES["withdrawals"], limit=1, columns="id,deleted_at"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.1", "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.2", "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -2249,10 +2277,10 @@ class RumiHandler(BaseHTTPRequestHandler):
             return self.ok(self.build_dashboard(user))
 
         if path == "/api/notifications":
-            return self.ok(self.get_notifications(user))
+            return self.ok(self.get_notifications(user, limit=None))
 
         if path == "/api/notifications/unread-count":
-            return self.ok({"count": len(self.get_notifications(user, limit=500, unread_only=True))})
+            return self.ok({"count": len(self.get_notifications(user, limit=None, unread_only=True))})
 
         if path == "/api/attendance/alerts":
             return self.ok(self.sync_attendance_alerts(user))
@@ -2486,6 +2514,50 @@ class RumiHandler(BaseHTTPRequestHandler):
             required_role = query.get("role", [""])[0]
             return self.ok(self.candidate_rows(work_date, start, end, exclude, ignore_shift, required_role))
 
+        if path == "/api/shifts/reassign-candidates":
+            self.require_role(user, "admin")
+            shift_id = integer(query.get("shift_id", ["0"])[0])
+            shifts = SB.select(TABLES["shifts"], filters={"id": f"eq.{shift_id}"}, limit=1)
+            if not shifts:
+                raise APIError("Không tìm thấy ca làm", 404)
+            shift = shifts[0]
+            if not shift.get("opening_id"):
+                raise APIError("Ca này không được tạo từ lịch đăng ký nên không có ứng viên đăng ký thay", 409)
+            if SB.select(TABLES["attendance"], filters={"shift_id": f"eq.{shift_id}"}, limit=1, columns="id"):
+                raise APIError("Ca đã có chấm công nên không thể đổi nhân viên", 409)
+            applications = SB.select(TABLES["applications"], filters={
+                "opening_id": f"eq.{integer(shift.get('opening_id'))}",
+                "status": "in.(Chờ duyệt,Danh sách chờ,Từ chối)",
+            }, order="applied_at.asc")
+            applications = [x for x in applications if integer(x.get("employee_id")) != integer(shift.get("employee_id"))]
+            employees = SB.select_in(TABLES["employees"], "id", [x.get("employee_id") for x in applications])
+            openings = SB.select(TABLES["openings"], filters={"id": f"eq.{integer(shift.get('opening_id'))}"}, limit=1)
+            if not openings:
+                raise APIError("Không tìm thấy lịch đăng ký gốc", 404)
+            opening = openings[0]
+            week_start = monday_of(str(shift.get("shift_date")))
+            week_end = week_start + timedelta(days=6)
+            data = parallel_calls(
+                shifts=lambda: SB.select(TABLES["shifts"], filters={"shift_date": f"gte.{week_start.isoformat()}", "and": f"(shift_date.lte.{week_end.isoformat()})"}),
+                leaves=lambda: SB.select(TABLES["leaves"], filters={"status": "eq.Đã duyệt", "start_date": f"lte.{shift['shift_date']}", "and": f"(end_date.gte.{shift['shift_date']})"}),
+                day_offs=lambda: SB.select(TABLES["day_offs"], filters={"week_start": f"eq.{week_start.isoformat()}"}),
+            )
+            e_map = employee_map(employees)
+            rows = []
+            for application in applications:
+                employee = e_map.get(integer(application.get("employee_id")), {})
+                if not employee:
+                    continue
+                rule = self.employee_shift_rule(employee, opening, data["shifts"], data["leaves"], data["day_offs"], allow_fixed_double=bool(application.get("weekly_request_id")))
+                rows.append({
+                    **application,
+                    "employee_name": employee.get("name"), "employee_code": employee.get("code"),
+                    "employee_role": employee.get("role"), "employment_type": employee.get("employment_type"),
+                    **rule,
+                })
+            rows.sort(key=lambda x: (0 if x.get("allowed") else 1, -num(x.get("score")), x.get("applied_at") or ""))
+            return self.ok({"shift": self.enriched_shifts([shift])[0], "candidates": rows})
+
         if path == "/api/attendance/today":
             self.require_role(user, "employee")
             shifts = SB.select(TABLES["shifts"], filters={"employee_id": f"eq.{user['employee_id']}", "shift_date": f"eq.{today_text()}"}, order="start_time.asc")
@@ -2681,17 +2753,82 @@ class RumiHandler(BaseHTTPRequestHandler):
 
         if path == "/api/notifications/read":
             notification_id = integer(body.get("id"))
-            rows = self.get_notifications(user)
+            rows = self.get_notifications(user, limit=None)
             allowed = {integer(x.get("id")) for x in rows}
             if notification_id:
                 if notification_id not in allowed:
                     raise APIError("Không tìm thấy thông báo", 404)
                 SB.update(TABLES["notifications"], {"read_at": now_iso()}, {"id": f"eq.{notification_id}"})
             else:
-                for row in rows:
-                    if not row.get("read_at"):
-                        SB.update(TABLES["notifications"], {"read_at": now_iso()}, {"id": f"eq.{row['id']}"})
+                unread_ids = [integer(row.get("id")) for row in rows if not row.get("read_at")]
+                for offset in range(0, len(unread_ids), 150):
+                    SB.update(TABLES["notifications"], {"read_at": now_iso()}, {"id": pg_in(unread_ids[offset:offset + 150])})
             return self.ok(None, "Đã đánh dấu đã đọc")
+
+        if path == "/api/notifications/delete":
+            self.require_role(user, "admin")
+            ids = sorted({integer(x) for x in (body.get("ids") or []) if integer(x)})
+            if not ids:
+                raise APIError("Hãy chọn ít nhất một thông báo")
+            allowed = {integer(x.get("id")) for x in self.get_notifications(user, limit=None)}
+            selected = [x for x in ids if x in allowed]
+            if len(selected) != len(ids):
+                raise APIError("Có thông báo không thuộc quyền quản trị", 403)
+            deleted = 0
+            for offset in range(0, len(selected), 150):
+                rows = SB.delete(TABLES["notifications"], {"id": pg_in(selected[offset:offset + 150])})
+                deleted += len(rows)
+            self.audit(user, "bulk_delete", "notification", "bulk", {"count": deleted, "ids": selected[:100]})
+            return self.ok({"deleted_count": deleted}, f"Đã xóa {deleted} thông báo")
+
+        if path == "/api/withdrawals/archive":
+            self.require_role(user, "admin")
+            ids = sorted({integer(x) for x in (body.get("ids") or []) if integer(x)})
+            reason = str(body.get("reason") or "Admin xóa khỏi lịch sử hiển thị").strip()[:500]
+            if not ids:
+                raise APIError("Hãy chọn ít nhất một lịch sử lấy hàng")
+            existing = SB.select_in(TABLES["withdrawals"], "id", ids, columns="id,deleted_at")
+            active_ids = [integer(x.get("id")) for x in existing if not x.get("deleted_at")]
+            if len(active_ids) != len(ids):
+                raise APIError("Có lịch sử không tồn tại hoặc đã bị xóa", 409)
+            archived = 0
+            for offset in range(0, len(active_ids), 150):
+                rows = SB.update(TABLES["withdrawals"], {
+                    "deleted_at": now_iso(), "deleted_by": user["id"], "delete_reason": reason,
+                }, {"id": pg_in(active_ids[offset:offset + 150]), "deleted_at": "is.null"})
+                archived += len(rows)
+            self.audit(user, "archive", "inventory_withdrawal", "bulk", {"count": archived, "reason": reason, "ids": active_ids[:100]})
+            return self.ok({"deleted_count": archived}, f"Đã xóa {archived} mục khỏi lịch sử; tồn kho không thay đổi")
+
+        if path == "/api/shifts/reassign":
+            self.require_role(user, "admin")
+            shift_id = integer(body.get("shift_id"))
+            application_id = integer(body.get("application_id"))
+            if not shift_id or not application_id:
+                raise APIError("Ca làm hoặc ứng viên chưa hợp lệ")
+            # Kiểm tra bằng cùng API nghiệp vụ trước khi gọi transaction SQL.
+            shifts = SB.select(TABLES["shifts"], filters={"id": f"eq.{shift_id}"}, limit=1)
+            applications = SB.select(TABLES["applications"], filters={"id": f"eq.{application_id}"}, limit=1)
+            if not shifts or not applications:
+                raise APIError("Không tìm thấy ca hoặc đơn đăng ký", 404)
+            shift, application = shifts[0], applications[0]
+            if integer(application.get("opening_id")) != integer(shift.get("opening_id")):
+                raise APIError("Nhân viên chưa đăng ký đúng lịch này", 409)
+            if application.get("status") not in {"Chờ duyệt", "Danh sách chờ", "Từ chối"}:
+                raise APIError("Chỉ có thể đổi sang nhân viên đã đăng ký và chưa rút đơn", 409)
+            result = SB.rpc("rumi_reassign_shift_to_application", {
+                "p_shift_id": shift_id, "p_application_id": application_id,
+                "p_admin_user_id": user["id"], "p_note": str(body.get("note") or "").strip()[:500],
+            })
+            old_id = integer((result or {}).get("old_employee_id"))
+            new_id = integer((result or {}).get("new_employee_id"))
+            if old_id:
+                self.notify_employee(old_id, "Lịch làm đã được đổi", f"Ca {shift['shift_date']} {str(shift['start_time'])[:5]}–{str(shift['end_time'])[:5]} đã chuyển cho nhân viên khác.", "schedule", "shifts")
+            if new_id:
+                self.notify_employee(new_id, "Bạn được xếp vào ca đã đăng ký", f"Ca {shift['shift_date']} {str(shift['start_time'])[:5]}–{str(shift['end_time'])[:5]} đã được quản lý duyệt thay.", "schedule", "shifts")
+            self.audit(user, "reassign", "shift", shift_id, {"application_id": application_id, "old_employee_id": old_id, "new_employee_id": new_id})
+            updated = SB.select(TABLES["shifts"], filters={"id": f"eq.{shift_id}"}, limit=1)
+            return self.ok(self.enriched_shifts(updated)[0] if updated else result, "Đã đổi nhân viên cho ca làm")
 
         if path == "/api/employees":
             self.require_role(user, "admin")
@@ -2702,6 +2839,13 @@ class RumiHandler(BaseHTTPRequestHandler):
             if not code or len(name) < 2 or not re.fullmatch(r"[a-z0-9._-]{3,40}", username):
                 raise APIError("Vui lòng nhập đủ mã, họ tên và tên đăng nhập hợp lệ")
             validate_password_policy(password, username)
+            employment_type = body.get("employment_type", "Part-time")
+            weekly_target = num(body.get("weekly_target_hours"), 48 if employment_type == "Full-time" else 24)
+            requested_weekly_max = num(body.get("max_weekly_hours"), 56)
+            if requested_weekly_max > 56:
+                raise APIError("Mỗi nhân viên chỉ được cấu hình tối đa 56 giờ/tuần")
+            if weekly_target > requested_weekly_max:
+                raise APIError("Giờ mục tiêu không được lớn hơn giới hạn giờ tuần")
             employee = SB.insert(TABLES["employees"], {
                 "code": code,
                 "name": name,
@@ -2709,9 +2853,9 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "email": str(body.get("email", "")).strip(),
                 "role": str(body.get("job_role", "Nhân viên")).strip(),
                 "hourly_wage": num(body.get("hourly_wage"), 25000),
-                "employment_type": body.get("employment_type", "Part-time"),
-                "weekly_target_hours": num(body.get("weekly_target_hours"), 48 if body.get("employment_type") == "Full-time" else 24),
-                "max_weekly_hours": num(body.get("max_weekly_hours"), 48),
+                "employment_type": employment_type,
+                "weekly_target_hours": weekly_target,
+                "max_weekly_hours": requested_weekly_max,
                 "max_daily_hours": num(body.get("max_daily_hours"), 8),
                 "max_consecutive_days": integer(body.get("max_consecutive_days"), 6),
                 "weekly_days_off": integer(body.get("weekly_days_off"), 1 if body.get("employment_type") == "Full-time" else 0),
@@ -3859,6 +4003,13 @@ class RumiHandler(BaseHTTPRequestHandler):
             username = str(body.get("username", "")).strip().lower()
             if not code or len(name) < 2 or not re.fullmatch(r"[a-z0-9._-]{3,40}", username):
                 raise APIError("Mã, họ tên hoặc tên đăng nhập chưa hợp lệ")
+            employment_type = body.get("employment_type", "Part-time")
+            weekly_target = num(body.get("weekly_target_hours"), 48 if employment_type == "Full-time" else 24)
+            requested_weekly_max = num(body.get("max_weekly_hours"), 56)
+            if requested_weekly_max > 56:
+                raise APIError("Mỗi nhân viên chỉ được cấu hình tối đa 56 giờ/tuần")
+            if weekly_target > requested_weekly_max:
+                raise APIError("Giờ mục tiêu không được lớn hơn giới hạn giờ tuần")
             rows = SB.update(TABLES["employees"], {
                 "code": code,
                 "name": name,
@@ -3866,9 +4017,9 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "email": str(body.get("email", "")).strip(),
                 "role": str(body.get("job_role", "Nhân viên")).strip(),
                 "hourly_wage": num(body.get("hourly_wage"), 25000),
-                "employment_type": body.get("employment_type", "Part-time"),
-                "weekly_target_hours": num(body.get("weekly_target_hours"), 48 if body.get("employment_type") == "Full-time" else 24),
-                "max_weekly_hours": num(body.get("max_weekly_hours"), 48),
+                "employment_type": employment_type,
+                "weekly_target_hours": weekly_target,
+                "max_weekly_hours": requested_weekly_max,
                 "max_daily_hours": num(body.get("max_daily_hours"), 8),
                 "max_consecutive_days": integer(body.get("max_consecutive_days"), 6),
                 "weekly_days_off": integer(body.get("weekly_days_off"), 1 if body.get("employment_type") == "Full-time" else 0),

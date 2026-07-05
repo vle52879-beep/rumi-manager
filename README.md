@@ -1,26 +1,39 @@
-# RUMI Manager 6.4.1 — Đăng ký 1 hoặc 2 ca/ngày
+# RUMI Manager 6.4.2 — Admin Control
 
-Bản nâng cấp của luồng đăng ký lịch tuần.
+Bản nâng cấp từ 6.4.1, tập trung vào quản trị thông báo, lịch sử kho, giới hạn giờ tuần và đổi nhân viên cho ca đã xếp.
 
-## Điểm mới
+## Tính năng mới
 
-- Mỗi ngày nhân viên có thể chọn:
-  - Ca ngày **09:00–17:00**.
-  - Ca tối **17:00–23:00**.
-  - Hoặc chọn **cả hai ca**.
-  - Hoặc nghỉ/không đăng ký.
-- Có nút **Tuần sau** để chuyển nhanh sang lịch tuần kế tiếp.
-- Full-time vẫn phải đăng ký đúng **6 ngày làm và 1 ngày nghỉ**, nhưng mỗi ngày được chọn 1 hoặc 2 ca.
-- Part-time chọn bất kỳ ca nào phù hợp.
-- Đơn hiển thị rõ số **ngày / ca / giờ**.
-- Admin duyệt từng ca hoặc duyệt toàn bộ các ca còn phù hợp.
-- Ca đôi chỉ được tạo khi đúng cặp 09–17 và 17–23 trong cùng một đơn tuần.
-- Giới hạn giờ tuần, ngày nghỉ, nghỉ phép, trùng ca và sức chứa ca vẫn được kiểm tra.
+### 1. Quản lý thông báo
+- Hiển thị toàn bộ thông báo, không còn giới hạn 100 mục.
+- Admin chọn từng thông báo hoặc chọn tất cả thông báo đang hiển thị.
+- Xóa nhiều thông báo cùng lúc.
+- Đánh dấu tất cả đã đọc vẫn áp dụng cho toàn bộ lịch sử.
 
-## Nâng cấp từ 6.4
+### 2. Xóa lịch sử lấy nguyên liệu
+- Admin chọn nhiều dòng lịch sử rồi xóa khỏi giao diện.
+- Đây là xóa mềm: không cộng lại số lượng tồn kho.
+- Lý do xóa và người thực hiện được lưu trong nhật ký quản trị.
 
-Đọc `UPGRADE_V641.md`.
+### 3. Giới hạn 56 giờ/tuần
+- Trần hệ thống là 56 giờ/tuần cho mọi nhân viên.
+- Admin có thể đặt giới hạn thấp hơn cho từng người.
+- Đơn đăng ký tuần và thao tác duyệt ca đều bị chặn nếu vượt giới hạn.
+- Nhân viên cũ đang để mặc định 48 giờ sẽ được nâng lên 56 giờ sau migration.
 
-## Triển khai Vercel
+### 4. Đổi nhân viên cho lịch đã xếp
+- Admin bấm **Đổi nhân viên** ngay trên ca chính thức.
+- Chỉ chọn được người đã đăng ký đúng ngày, đúng giờ và đúng ca đó.
+- Hỗ trợ người đang Chờ duyệt, Danh sách chờ hoặc đã bị Từ chối nhưng chưa rút đơn.
+- Hệ thống vẫn kiểm tra trùng lịch, nghỉ phép, ngày nghỉ, giờ ngày và 56 giờ/tuần.
+- Không cho đổi nếu ca đã có chấm công.
+- Kết quả đơn của người cũ và người mới được cập nhật tự động.
+- Lịch sử đổi ca được lưu riêng.
 
-Đọc `DEPLOY_VERCEL.md`.
+## Cài đặt
+
+1. Chạy `sql/SUPABASE_RUMI_V6_4_2_ADMIN_CONTROL.sql` trong Supabase SQL Editor.
+2. Đẩy mã nguồn lên Vercel.
+3. Mở `/api/health` và kiểm tra phiên bản `6.4.2`.
+
+Đọc thêm `UPGRADE_V642.md` và `DEPLOY_VERCEL.md`.

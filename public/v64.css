@@ -12,7 +12,7 @@
 @media(max-width:1100px){.v64-admin-summary{grid-template-columns:1fr 1fr}.v64-request-metrics{grid-template-columns:1fr 1fr}.v64-employee-toolbar{grid-template-columns:1fr}.v64-own-request{grid-template-columns:1fr 1fr}.v64-week-submit{grid-template-columns:1fr}}
 @media(max-width:700px){.v64-week-controls>div{min-width:160px}.v64-admin-summary{grid-template-columns:1fr}.v64-request-card{padding:16px}.v64-request-card>header{display:grid}.v64-request-metrics,.v64-own-request{grid-template-columns:1fr}.v64-request-card>footer,.v64-week-submit .actions{display:grid}.v64-week-submit{padding:15px}.v64-weekly-grid,.v64-capacity-board,.v64-request-items,.v64-official-board{scroll-snap-type:x mandatory}.v64-register-day,.v64-capacity-board>section,.v64-request-item,.v64-official-day{scroll-snap-align:start}}
 
-/* RUMI 6.4.1 — 1 hoặc 2 ca/ngày và đăng ký tuần sau */
+/* RUMI 6.4.2 — 1 hoặc 2 ca/ngày và đăng ký tuần sau */
 .v64-week-controls{flex-wrap:wrap}
 .v64-register-day.double-selected{border-color:#b8784f;box-shadow:0 0 0 3px rgba(151,84,52,.12),0 18px 36px rgba(72,42,28,.12)}
 .v64-register-day.double-selected>header span{color:var(--brand);font-weight:800}

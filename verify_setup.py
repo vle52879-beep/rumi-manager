@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Verify RUMI v6.4.1 Supabase objects without changing business data."""
+"""Verify RUMI v6.4.2 Supabase objects without changing business data."""
 from server import APIError, SB, SUPABASE_URL, TABLES, now_iso, validate_config
 
 
 def main():
     validate_config()
     print(f"Supabase: {SUPABASE_URL}")
-    print("Kiểm tra bảng RUMI v6.4.1...")
+    print("Kiểm tra bảng RUMI v6.4.2...")
     ok = 0
     for table in TABLES.values():
         try:
@@ -17,7 +17,7 @@ def main():
             print(f"  ✗ {table}: {exc}")
     print(f"\nKết quả: {ok}/{len(TABLES)} bảng truy cập được.")
     if ok != len(TABLES):
-        print("Chạy đầy đủ migration đến sql/SUPABASE_RUMI_V6_4_1_DOUBLE_SHIFT.sql.")
+        print("Chạy đầy đủ migration đến sql/SUPABASE_RUMI_V6_4_2_ADMIN_CONTROL.sql.")
         raise SystemExit(1)
 
     # Read-only function discovery is not available through PostgREST, so call
@@ -31,11 +31,13 @@ def main():
     try:
         SB.rpc("rumi_refresh_weekly_shift_request", {"p_request_id": 0})
         SB.select(TABLES["weekly_requests"], limit=1, columns="id,selected_days,selected_shifts,approved_shifts")
-        print("  ✓ RPC và cột ca đôi v6.4.1")
+        SB.select(TABLES["withdrawals"], limit=1, columns="id,deleted_at,deleted_by,delete_reason")
+        SB.select(TABLES["shift_reassignments"], limit=1, columns="id,shift_id,new_application_id")
+        print("  ✓ Ca đôi, xóa lịch sử mềm và đổi nhân viên v6.4.2")
     except APIError as exc:
-        print(f"  ✗ Migration v6.4.1: {exc}")
+        print(f"  ✗ Migration v6.4.2: {exc}")
         raise SystemExit(1)
-    print("RUMI v6.4.1 đã sẵn sàng.")
+    print("RUMI v6.4.2 đã sẵn sàng.")
 
 
 if __name__ == "__main__":
