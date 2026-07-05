@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RUMI Manager v6.4.2 ADMIN CONTROL — fixed admin account, employee CRUD, roles, scheduling and GPS.
+"""RUMI Manager v6.4.3 MULTI ADMIN — multiple administrator accounts, employee CRUD, roles, scheduling and GPS.
 
 Python standard library only. The Supabase secret key stays in this backend and
 is never sent to the browser. Every database object used by this app starts
@@ -710,7 +710,10 @@ def public_user(user: dict, employee: dict | None = None) -> dict:
         "username": user.get("username"),
         "role": user.get("role"),
         "employee_id": user.get("employee_id"),
-        "name": employee.get("name") or (ADMIN_DISPLAY_NAME if user.get("role") == "admin" else user.get("username")),
+        "name": employee.get("name") or (
+            ADMIN_DISPLAY_NAME if user.get("role") == "admin" and str(user.get("username") or "").lower() == ADMIN_USERNAME
+            else user.get("username")
+        ),
         "employee_code": employee.get("code"),
         "job_role": employee.get("role"),
         "employment_type": employee.get("employment_type"),
@@ -748,7 +751,7 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/6.4.2"
+    server_version = "RUMI/6.4.3"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -2231,7 +2234,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 shift_reassignments=lambda: SB.select(TABLES["shift_reassignments"], limit=1, columns="id"),
                 withdrawal_archive=lambda: SB.select(TABLES["withdrawals"], limit=1, columns="id,deleted_at"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.2", "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.3", "multi_admin_accounts": True, "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -2254,10 +2257,30 @@ class RumiHandler(BaseHTTPRequestHandler):
                 clean_sessions.append(item)
             events = SB.select(TABLES["audit"], filters={"user_id": f"eq.{user['id']}", "entity_type": "eq.security"}, order="created_at.desc", limit=20,
                                columns="id,action,entity_id,detail,created_at")
+            admin_accounts = []
+            if user.get("role") == "admin":
+                rows = SB.select(
+                    TABLES["users"], filters={"role": "eq.admin"}, order="created_at.asc",
+                    columns="id,username,active,must_change_password,password_changed_at,last_login_at,created_at,locked_until,failed_login_count",
+                )
+                admin_accounts = [{
+                    "id": row.get("id"),
+                    "username": row.get("username"),
+                    "active": bool(row.get("active")),
+                    "must_change_password": bool(row.get("must_change_password")),
+                    "password_changed_at": row.get("password_changed_at"),
+                    "last_login_at": row.get("last_login_at"),
+                    "created_at": row.get("created_at"),
+                    "locked_until": row.get("locked_until"),
+                    "failed_login_count": integer(row.get("failed_login_count")),
+                    "current": integer(row.get("id")) == integer(user.get("id")),
+                    "primary": str(row.get("username") or "").lower() == ADMIN_USERNAME,
+                } for row in rows]
             return self.ok({
                 "profile": user["profile"],
                 "sessions": clean_sessions,
                 "events": events,
+                "admin_accounts": admin_accounts,
                 "policy": {
                     "minimum_length": 12 if user.get("role") == "admin" else PASSWORD_MIN_LENGTH,
                     "password_history": 5,
@@ -2695,6 +2718,39 @@ class RumiHandler(BaseHTTPRequestHandler):
 
         user = self.current_user()
         self.require_password_changed(user, path)
+
+        if path == "/api/admin/accounts":
+            self.require_role(user, "admin")
+            username = str(body.get("username", "")).strip().lower()
+            password = str(body.get("password", ""))
+            confirm_password = str(body.get("confirm_password", password))
+            if not re.fullmatch(r"[a-z0-9._-]{3,40}", username):
+                raise APIError("Tên đăng nhập admin phải có 3-40 ký tự a-z, 0-9, dấu chấm, gạch dưới hoặc gạch ngang")
+            if password != confirm_password:
+                raise APIError("Xác nhận mật khẩu admin không khớp")
+            validate_password_policy(password, username, admin=True)
+            existing = SB.select(TABLES["users"], filters={"username": f"eq.{username}"}, limit=1, columns="id,role")
+            if existing:
+                raise APIError("Tên đăng nhập này đã tồn tại", 409)
+            hashed, salt = password_hash(password, iterations=PASSWORD_ITERATIONS)
+            account = SB.insert(TABLES["users"], {
+                "username": username,
+                "password_hash": hashed,
+                "password_salt": salt,
+                "password_iterations": PASSWORD_ITERATIONS,
+                "must_change_password": True,
+                "password_changed_at": None,
+                "role": "admin",
+                "employee_id": None,
+                "active": True,
+                "failed_login_count": 0,
+                "locked_until": None,
+            })
+            self.audit(user, "create_admin", "security", account.get("id"), {"username": username})
+            return self.ok({
+                "id": account.get("id"), "username": username, "active": True,
+                "must_change_password": True,
+            }, "Đã tạo tài khoản admin mới; tài khoản phải đổi mật khẩu ở lần đăng nhập đầu tiên")
 
         if path == "/api/auth/change-password":
             old_password = str(body.get("old_password", ""))

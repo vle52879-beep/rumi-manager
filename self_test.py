@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from zipfile import ZipFile
 
 from excel_export import build_schedule_week_xlsx
-from server import PASSWORD_ITERATIONS, RumiHandler, attendance_metrics, calculate_hours, classify_shift_attendance, make_session, overlaps, parse_session, password_hash, validate_password_policy, verify_password
+from server import PASSWORD_ITERATIONS, RumiHandler, attendance_metrics, calculate_hours, classify_shift_attendance, make_session, overlaps, parse_session, password_hash, public_user, validate_password_policy, verify_password
 
 
 def main():
@@ -15,6 +15,8 @@ def main():
     assert verify_password("MatKhauAnToan123!", digest, salt, PASSWORD_ITERATIONS)
     validate_password_policy("MatKhauAnToan123!", "nhanvien")
     assert not verify_password("sai", digest, salt, PASSWORD_ITERATIONS)
+    secondary_admin = public_user({"id": 2, "username": "quanly2", "role": "admin", "employee_id": None})
+    assert secondary_admin["name"] == "quanly2" and secondary_admin["role"] == "admin"
     token = make_session(42)
     assert parse_session(token) == 42
     assert parse_session(token + "x") is None
@@ -133,6 +135,11 @@ def main():
     assert "max_weekly_hours between weekly_target_hours and 56" in migration_642
     assert "deleted_at" in migration_642 and "rumi_shift_reassignments" in migration_642
     assert "rumi_reassign_shift_to_application" in migration_642
+    server_source = (Path(__file__).resolve().parent / "server.py").read_text(encoding="utf-8")
+    security_source = (Path(__file__).resolve().parent / "public" / "v55.js").read_text(encoding="utf-8")
+    assert 'path == "/api/admin/accounts"' in server_source
+    assert '"admin_accounts": admin_accounts' in server_source
+    assert 'data-form="v643-admin-create"' in security_source
 
     print("✓ PBKDF2-HMAC-SHA256 600.000 vòng và chính sách mật khẩu")
     print("✓ Chữ ký phiên đăng nhập")
@@ -146,6 +153,7 @@ def main():
     print("✓ Một ngày được chọn 1 hoặc cả 2 ca cố định 09–17 và 17–23")
     print("✓ Trần 56 giờ/tuần được áp dụng")
     print("✓ Migration xóa lịch sử mềm và đổi nhân viên theo đơn đăng ký")
+    print("✓ Tạo thêm tài khoản admin riêng và bắt buộc đổi mật khẩu lần đầu")
     print("Self-test hoàn tất.")
 
 

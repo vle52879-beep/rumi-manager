@@ -2,7 +2,7 @@
 
 /* RUMI 5.5 — account security and smart attendance. */
 (() => {
-  const VERSION = '5.5.0';
+  const VERSION = '6.4.3';
 
   icons.shield = '<svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.2c0 4.7 3.2 8.9 7.5 10.1 4.3-1.2 7.5-5.4 7.5-10.1V6L12 3Z"/><path d="m8.7 12.1 2.1 2.1 4.6-4.8"/></svg>';
   icons.device = '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 17h6"/></svg>';
@@ -76,15 +76,41 @@
             </div>`).join('') || empty('Chưa có phiên đăng nhập', 'Đăng nhập lại để tạo phiên mới.', 'device')}</div></div>
         </article>
       </section>
+      ${profile.role === 'admin' ? adminAccountsPanel(data) : ''}
       <article class="card section-gap">
-        <div class="card-head"><div><h3>Nhật ký bảo mật gần đây</h3><p>Đăng nhập, đổi mật khẩu và thu hồi thiết bị được lưu lại.</p></div></div>
+        <div class="card-head"><div><h3>Nhật ký bảo mật gần đây</h3><p>Đăng nhập, đổi mật khẩu, tạo admin và thu hồi thiết bị được lưu lại.</p></div></div>
         <div class="card-body">${(data.events || []).length ? `<div class="list">${data.events.map((x) => `<div class="list-row"><span class="list-icon">${icons.shield}</span><div class="list-copy"><strong>${securityActionName(x.action)}</strong><span>${dateTimeVN(x.created_at)}</span></div>${badge('Đã ghi nhận')}</div>`).join('')}</div>` : empty('Chưa có sự kiện bảo mật', 'Các thao tác bảo mật sẽ hiển thị ở đây.', 'shield')}</div>
       </article>`;
     updatePasswordMeter();
   }
 
+  function adminAccountsPanel(data) {
+    const rows = Array.isArray(data.admin_accounts) ? data.admin_accounts : [];
+    return `<article class="card section-gap">
+      <div class="card-head"><div><h3>${icons.shield} Quản trị viên hệ thống</h3><p>Tạo thêm tài khoản admin riêng; không dùng chung mật khẩu giữa các quản lý.</p></div><span class="badge brand">${rows.filter((x) => x.active).length} đang hoạt động</span></div>
+      <div class="card-body">
+        <div class="table-wrap"><table><thead><tr><th>Tài khoản</th><th>Loại</th><th>Lần đăng nhập cuối</th><th>Yêu cầu đổi mật khẩu</th><th>Trạng thái</th></tr></thead><tbody>${rows.map((x) => `<tr>
+          <td><span class="cell-main">${esc(x.username || '—')}</span><span class="cell-sub">Tạo ${x.created_at ? dateTimeVN(x.created_at) : '—'}${x.current ? ' · Phiên hiện tại' : ''}</span></td>
+          <td>${x.primary ? '<span class="badge brand">Admin chính</span>' : '<span class="badge gray">Admin bổ sung</span>'}</td>
+          <td>${x.last_login_at ? dateTimeVN(x.last_login_at) : 'Chưa đăng nhập'}</td>
+          <td>${x.must_change_password ? '<span class="badge amber">Bắt buộc</span>' : '<span class="badge green">Đã hoàn tất</span>'}</td>
+          <td>${x.active ? '<span class="badge green">Hoạt động</span>' : '<span class="badge gray">Đã khóa</span>'}</td>
+        </tr>`).join('') || `<tr><td colspan="5">${empty('Chưa có tài khoản admin', 'Tạo tài khoản quản trị đầu tiên bên dưới.', 'shield')}</td></tr>`}</tbody></table></div>
+        <div class="section-gap"><div class="card-head"><div><h3>Tạo admin mới</h3><p>Admin mới có toàn bộ quyền quản trị và phải đổi mật khẩu ở lần đăng nhập đầu tiên.</p></div></div>
+          <form class="form-grid" data-form="v643-admin-create">
+            <div class="field"><label>Tên đăng nhập</label><input name="username" autocomplete="off" pattern="[a-z0-9._-]{3,40}" minlength="3" maxlength="40" placeholder="Ví dụ: quanly2" required><div class="field-hint">Chữ thường, số, dấu chấm, gạch dưới hoặc gạch ngang.</div></div>
+            <div class="field"><label>Mật khẩu tạm thời</label><div class="v55-password-input"><input type="password" name="password" autocomplete="new-password" minlength="12" maxlength="128" required><button type="button" data-v55-action="toggle-password" aria-label="Hiện mật khẩu">${icons.info}</button></div></div>
+            <div class="field"><label>Nhập lại mật khẩu</label><input type="password" name="confirm_password" autocomplete="new-password" minlength="12" maxlength="128" required></div>
+            <div class="form-actions"><button class="btn" type="submit">${icons.plus} Tạo tài khoản admin</button></div>
+          </form>
+          ${passwordRules({ minimum_length: 12 })}
+        </div>
+      </div>
+    </article>`;
+  }
+
   function securityActionName(action) {
-    return ({login:'Đăng nhập thành công', logout:'Đăng xuất', logout_all:'Đăng xuất mọi thiết bị', change_password:'Đổi mật khẩu', revoke_session:'Thu hồi thiết bị', clock_rejected:'Chấm công bị từ chối'})[action] || String(action || 'Sự kiện bảo mật').replaceAll('_', ' ');
+    return ({login:'Đăng nhập thành công', logout:'Đăng xuất', logout_all:'Đăng xuất mọi thiết bị', change_password:'Đổi mật khẩu', revoke_session:'Thu hồi thiết bị', create_admin:'Tạo tài khoản admin', clock_rejected:'Chấm công bị từ chối'})[action] || String(action || 'Sự kiện bảo mật').replaceAll('_', ' ');
   }
 
   function passwordScore(value) {
@@ -111,6 +137,20 @@
   const oldHandleForm = handleForm;
   handleForm = async function handleFormV55(form) {
     const type = form.dataset.form;
+    if (type === 'v643-admin-create') {
+      const data = Object.fromEntries(new FormData(form).entries());
+      const submit = form.querySelector('button[type="submit"]');
+      if (data.password !== data.confirm_password) return toast('Xác nhận mật khẩu admin không khớp', 'error');
+      if (submit) submit.disabled = true;
+      try {
+        await api('/api/admin/accounts', { method:'POST', body:data });
+        form.reset();
+        toast('Đã tạo admin mới; tài khoản phải đổi mật khẩu ở lần đăng nhập đầu tiên');
+        return navigate('security');
+      } catch (error) { toast(error.message, 'error'); }
+      finally { if (submit) submit.disabled = false; }
+      return;
+    }
     if (type === 'v55-change-password') {
       const data = Object.fromEntries(new FormData(form).entries());
       const submit = form.querySelector('button[type="submit"]');

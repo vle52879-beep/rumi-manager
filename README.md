@@ -34,6 +34,11 @@ Bản nâng cấp từ 6.4.1, tập trung vào quản trị thông báo, lịch 
 
 1. Chạy `sql/SUPABASE_RUMI_V6_4_2_ADMIN_CONTROL.sql` trong Supabase SQL Editor.
 2. Đẩy mã nguồn lên Vercel.
-3. Mở `/api/health` và kiểm tra phiên bản `6.4.2`.
+3. Mở `/api/health` và kiểm tra phiên bản `6.4.3`.
 
 Đọc thêm `UPGRADE_V642.md` và `DEPLOY_VERCEL.md`.
+
+
+## v6.4.3 — Nhiều tài khoản admin
+
+Admin chính có thể tạo thêm tài khoản quản trị trong trang **Tài khoản & bảo mật**. Tài khoản mới phải đổi mật khẩu ở lần đăng nhập đầu tiên. Không cần migration SQL.
