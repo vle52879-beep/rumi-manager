@@ -29,6 +29,21 @@ def main():
     assert approved["base_payable_minutes"] == 240
     assert approved["payable_minutes"] == 250
 
+    # Official shifts must remain visible in payroll even before attendance exists.
+    future_payroll = RumiHandler.payroll_from_rows(
+        None,
+        [{"id": 1, "code": "NV001", "name": "Nguyễn An", "role": "Pha chế", "hourly_wage": 25000}],
+        [], [], [],
+        [{"id": 99, "employee_id": 1, "shift_date": "2099-07-05", "start_time": "08:00", "end_time": "16:00", "status": "Đã xếp"}],
+    )[0]
+    assert future_payroll["scheduled_shift_count"] == 1
+    assert future_payroll["scheduled_hours"] == 8
+    assert future_payroll["completed_shift_count"] == 0
+    assert future_payroll["payable_hours"] == 0
+    assert future_payroll["estimated_salary"] == 200000
+    assert future_payroll["payroll_state"] == "Chưa đến ca"
+    assert not future_payroll["eligible_for_payment"]
+
     employee = {
         "id": 1, "status": "Đang làm", "role": "Pha chế", "employment_type": "Full-time",
         "weekly_target_hours": 48, "max_weekly_hours": 48, "max_daily_hours": 8,
@@ -61,6 +76,7 @@ def main():
     print("✓ Chữ ký phiên đăng nhập")
     print("✓ Kiểm tra trùng ca")
     print("✓ Tính giờ lương theo khung ca; tăng ca phải duyệt")
+    print("✓ Ca chính thức vẫn hiện trong bảng lương trước khi chấm công")
     print("✓ Luật Full-time 6 ngày làm + 1 ngày nghỉ")
     print("✓ Xuất lịch tuần Excel 2 sheet")
     print("Self-test hoàn tất.")

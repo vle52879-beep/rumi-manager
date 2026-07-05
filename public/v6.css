@@ -358,3 +358,12 @@ tbody tr:hover{position:relative;z-index:2;background:linear-gradient(90deg,#fff
 @keyframes v6CounterPop{0%{transform:translateY(8px) scale(.88);opacity:.3}100%{transform:none;opacity:1}}
 @media(max-width:1100px){.v6-hero-art{right:4%;opacity:.3}}
 @media(max-width:760px){.v6-hero-art{display:none}}
+
+
+/* RUMI 6.1 — payroll/schedule logic clarity */
+.v61-payroll-month{display:inline-flex!important;align-items:center;width:max-content;margin-top:5px;padding:3px 7px;border-radius:999px;background:rgba(139,78,52,.09);color:#8b4e34!important;font-size:10px!important;font-weight:800;letter-spacing:.03em}
+#v5-payroll-rows .cell-sub{display:block;margin-top:4px;line-height:1.42}
+#v5-payroll-rows td{vertical-align:middle}
+#v5-payroll-rows .badge+ .cell-sub{margin-top:7px}
+.btn:disabled[title]{cursor:not-allowed;filter:saturate(.45);opacity:.55}
+@media(max-width:900px){#v5-payroll-rows .actions{min-width:170px}.v61-payroll-month{font-size:9px!important}}

@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const VERSION = '6.0.0';
+  const VERSION = '6.1.0';
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   let renderTimer = 0;
   let requestCount = 0;

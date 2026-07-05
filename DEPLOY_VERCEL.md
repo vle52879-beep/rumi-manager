@@ -1,21 +1,38 @@
-# Deploy RUMI 6.0 lên Vercel
+# Deploy RUMI 6.1 lên Vercel
 
-Bản 6.0 giữ nguyên cấu hình Vercel và Supabase của bản đang chạy.
+## 1. Chạy migration
+
+```bash
+cd ~/Downloads/RUMI-Manager-Supabase-v6.1-PAYROLL-LOGIC
+pbcopy < sql/SUPABASE_RUMI_V6_1_PAYROLL_LOGIC.sql
+```
+
+Mở Supabase → SQL Editor → New query → dán → Run.
+
+## 2. Ghi đè mã nguồn và push
 
 ```bash
 cd ~/Downloads
-unzip -o RUMI-Manager-Supabase-v6.0-PREMIUM-UI.zip
 
 rsync -av --delete \
   --exclude='.git' \
   --exclude='.env' \
-  RUMI-Manager-Supabase-v6.0-PREMIUM-UI/ \
+  RUMI-Manager-Supabase-v6.1-PAYROLL-LOGIC/ \
   RUMI-Manager-Supabase-v4.4-Vercel/
 
 cd ~/Downloads/RUMI-Manager-Supabase-v4.4-Vercel
+
 git add -A
-git commit -m "Upgrade RUMI 6.0 premium motion UI"
+git commit -m "Fix RUMI 6.1 payroll and schedule logic"
 git push
 ```
 
-Không chạy SQL mới. Chờ Vercel `Ready`, sau đó tải lại bằng `Command + Shift + R`.
+Chờ Vercel báo Ready rồi nhấn `Command + Shift + R`.
+
+Kiểm tra:
+
+```text
+https://rumi-manager-test.vercel.app/api/health
+```
+
+Kết quả cần có `"version":"6.1.0"` và `"payroll_logic_v2":true`.

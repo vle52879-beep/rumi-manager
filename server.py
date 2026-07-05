@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RUMI Manager v5.5 SECURITY & SMART ATTENDANCE — fixed admin account, employee CRUD, roles, scheduling and GPS.
+"""RUMI Manager v6.1 PAYROLL LOGIC — fixed admin account, employee CRUD, roles, scheduling and GPS.
 
 Python standard library only. The Supabase secret key stays in this backend and
 is never sent to the browser. Every database object used by this app starts
@@ -138,16 +138,24 @@ def load_env() -> None:
 load_env()
 
 
+LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+def local_now() -> datetime:
+    """Current store time. Vercel may run in UTC, so never trust server locale."""
+    return datetime.now(LOCAL_TZ)
+
+
 def now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+    return local_now().isoformat(timespec="seconds")
 
 
 def today_text() -> str:
-    return date.today().isoformat()
+    return local_now().date().isoformat()
 
 
 def current_month() -> str:
-    return datetime.now().strftime("%Y-%m")
+    return local_now().strftime("%Y-%m")
 
 
 def monday_of(value: str | date) -> date:
@@ -396,6 +404,8 @@ class SupabaseREST:
                 return "Chưa nâng cấp RUMI v5.5. Hãy chạy sql/SUPABASE_RUMI_V5_5_SECURITY_ATTENDANCE.sql trong Supabase."
             if "shift_openings" in lowered or "shift_applications" in lowered or "weekly_day_off" in lowered:
                 return "Chưa nâng cấp RUMI v5.4. Hãy chạy sql/SUPABASE_RUMI_V5_4_SHIFT_MARKET.sql trong Supabase."
+            if any(name in lowered for name in ("scheduled_shift_count", "completed_shift_count", "eligible_for_payment", "payroll_state")):
+                return "Chưa nâng cấp logic bảng lương RUMI v6.1. Hãy chạy sql/SUPABASE_RUMI_V6_1_PAYROLL_LOGIC.sql trong Supabase."
             if "payroll_runs" in lowered or "payroll_items" in lowered:
                 return "Chưa nâng cấp RUMI v5.3. Hãy chạy sql/SUPABASE_RUMI_V5_3_OPERATIONS.sql trong Supabase."
             return "Chưa tạo đủ bảng RUMI. Hãy chạy SQL v4, v5.3 rồi v5.4 theo đúng thứ tự."
@@ -652,7 +662,7 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/6.0.0"
+    server_version = "RUMI/6.1.0"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -1308,14 +1318,91 @@ class RumiHandler(BaseHTTPRequestHandler):
         self.notify_employee(integer(employee["id"]), "Đăng ký ca đã được duyệt", f"Ca {opening['work_date']} {str(opening['start_time'])[:5]}–{str(opening['end_time'])[:5]} đã được xếp.", "schedule", "shifts")
         return updated
 
-    def payroll_from_rows(self, employees, attendance, adjustments, payments) -> list[dict]:
+    def payroll_from_rows(self, employees, attendance, adjustments, payments, shifts=None) -> list[dict]:
+        """Build monthly payroll with schedule, attendance and payable time separated.
+
+        Official shifts come from rumi_shifts instead of attendance. A future or
+        unclocked shift therefore remains visible as scheduled work rather than
+        incorrectly appearing as "0 ca · 0 giờ".
+        """
+        shifts = shifts or []
+        now_local = local_now()
+        today_local = now_local.date()
+
         totals: dict[int, dict] = defaultdict(lambda: {
-            "actual_hours": 0.0, "payable_hours": 0.0, "scheduled_hours": 0.0,
-            "late_minutes": 0, "early_leave_minutes": 0, "overtime_minutes": 0,
+            "actual_hours": 0.0,
+            "payable_hours": 0.0,
+            "scheduled_hours": 0.0,
+            "late_minutes": 0,
+            "early_leave_minutes": 0,
+            "overtime_minutes": 0,
             "attendance_count": 0,
+            "scheduled_shift_count": 0,
+            "completed_shift_count": 0,
+            "upcoming_shift_count": 0,
+            "active_shift_count": 0,
+            "pending_checkin_count": 0,
+            "missing_attendance_count": 0,
+            "incomplete_attendance_count": 0,
         })
+
+        attendance_by_shift = {
+            integer(row.get("shift_id")): row
+            for row in attendance
+            if integer(row.get("shift_id"))
+        }
+
+        for shift in shifts:
+            eid = integer(shift.get("employee_id"))
+            if not eid:
+                continue
+            bucket = totals[eid]
+            scheduled = calculate_hours(
+                str(shift.get("start_time") or "00:00"),
+                str(shift.get("end_time") or "00:00"),
+            )
+            bucket["scheduled_hours"] += scheduled
+            bucket["scheduled_shift_count"] += 1
+
+            try:
+                shift_day = datetime.strptime(str(shift.get("shift_date"))[:10], "%Y-%m-%d").date()
+                start_dt = datetime.combine(
+                    shift_day,
+                    datetime.strptime(str(shift.get("start_time"))[:5], "%H:%M").time(),
+                    tzinfo=LOCAL_TZ,
+                )
+                end_dt = datetime.combine(
+                    shift_day,
+                    datetime.strptime(str(shift.get("end_time"))[:5], "%H:%M").time(),
+                    tzinfo=LOCAL_TZ,
+                )
+            except Exception:
+                shift_day = today_local
+                start_dt = now_local
+                end_dt = now_local
+
+            att = attendance_by_shift.get(integer(shift.get("id")))
+            has_in = bool(att and (att.get("check_in") or att.get("check_in_at")))
+            has_out = bool(att and (att.get("check_out") or att.get("check_out_at")))
+
+            if start_dt > now_local:
+                bucket["upcoming_shift_count"] += 1
+            elif start_dt <= now_local < end_dt:
+                if has_out:
+                    pass
+                elif has_in:
+                    bucket["active_shift_count"] += 1
+                else:
+                    bucket["pending_checkin_count"] += 1
+            elif not has_in:
+                bucket["missing_attendance_count"] += 1
+            elif not has_out:
+                bucket["incomplete_attendance_count"] += 1
+
         for row in attendance:
             eid = integer(row.get("employee_id"))
+            if not eid:
+                continue
             bucket = totals[eid]
             worked_minutes = integer(row.get("worked_minutes"))
             if worked_minutes > 0:
@@ -1324,18 +1411,28 @@ class RumiHandler(BaseHTTPRequestHandler):
                 actual = calculate_hours(str(row.get("check_in")), str(row.get("check_out")))
             else:
                 actual = num(row.get("hours"))
+
             payable = num(row.get("payable_hours"), num(row.get("hours")))
             bucket["actual_hours"] += actual
             bucket["payable_hours"] += payable
-            bucket["scheduled_hours"] += num(row.get("scheduled_hours"))
+            if not shifts and num(row.get("scheduled_hours")):
+                bucket["scheduled_hours"] += num(row.get("scheduled_hours"))
+                bucket["scheduled_shift_count"] += 1
             bucket["late_minutes"] += integer(row.get("late_minutes"))
             bucket["early_leave_minutes"] += integer(row.get("early_leave_minutes"))
-            bucket["overtime_minutes"] += integer(row.get("overtime_approved_minutes"), integer(row.get("overtime_minutes")))
-            if row.get("check_out") or row.get("status") != "Đang làm":
+            bucket["overtime_minutes"] += integer(
+                row.get("overtime_approved_minutes"),
+                integer(row.get("overtime_minutes")),
+            )
+            has_out = bool(row.get("check_out") or row.get("check_out_at"))
+            if has_out and row.get("status") != "Đang làm":
                 bucket["attendance_count"] += 1
+                bucket["completed_shift_count"] += 1
+
         adj_map = {integer(x.get("employee_id")): x for x in adjustments}
         pay_map = {integer(x.get("employee_id")): x for x in payments}
         output = []
+
         for employee in employees:
             eid = integer(employee.get("id"))
             t = totals[eid]
@@ -1348,45 +1445,149 @@ class RumiHandler(BaseHTTPRequestHandler):
             penalty = num(adjustment.get("penalty"))
             advance = num(adjustment.get("advance_pay"))
             base_salary = round(payable_hours * num(employee.get("hourly_wage")))
+            estimated_salary = round(scheduled_hours * num(employee.get("hourly_wage")))
             total = round(base_salary + bonus - penalty - advance)
+
+            unresolved = (
+                t["missing_attendance_count"]
+                + t["incomplete_attendance_count"]
+                + t["pending_checkin_count"]
+                + t["active_shift_count"]
+                + t["upcoming_shift_count"]
+            )
+
+            if t["incomplete_attendance_count"]:
+                payroll_state = "Thiếu giờ ra"
+            elif t["missing_attendance_count"]:
+                payroll_state = "Thiếu chấm công"
+            elif t["pending_checkin_count"]:
+                payroll_state = "Đến giờ chấm công"
+            elif t["active_shift_count"]:
+                payroll_state = "Đang làm"
+            elif t["upcoming_shift_count"]:
+                payroll_state = "Chưa đến ca"
+            elif t["scheduled_shift_count"] == 0 and payable_hours == 0:
+                payroll_state = "Không có lịch"
+            elif payable_hours > 0:
+                payroll_state = "Đủ dữ liệu"
+            else:
+                payroll_state = "Chưa có công"
+
+            eligible_for_payment = bool(total > 0 and unresolved == 0)
+
             output.append({
-                "employee_id": eid, "code": employee.get("code"), "name": employee.get("name"),
-                "role": employee.get("role"), "hourly_wage": num(employee.get("hourly_wage")),
-                "hours": payable_hours, "actual_hours": actual_hours, "payable_hours": payable_hours,
-                "scheduled_hours": scheduled_hours, "late_minutes": t["late_minutes"],
-                "early_leave_minutes": t["early_leave_minutes"], "overtime_minutes": t["overtime_minutes"],
-                "attendance_count": t["attendance_count"], "base_salary": base_salary,
-                "bonus": bonus, "penalty": penalty, "advance_pay": advance,
+                "employee_id": eid,
+                "code": employee.get("code"),
+                "name": employee.get("name"),
+                "role": employee.get("role"),
+                "hourly_wage": num(employee.get("hourly_wage")),
+                "hours": payable_hours,
+                "actual_hours": actual_hours,
+                "payable_hours": payable_hours,
+                "scheduled_hours": scheduled_hours,
+                "late_minutes": t["late_minutes"],
+                "early_leave_minutes": t["early_leave_minutes"],
+                "overtime_minutes": t["overtime_minutes"],
+                "attendance_count": t["attendance_count"],
+                "scheduled_shift_count": t["scheduled_shift_count"],
+                "completed_shift_count": t["completed_shift_count"],
+                "upcoming_shift_count": t["upcoming_shift_count"],
+                "active_shift_count": t["active_shift_count"],
+                "pending_checkin_count": t["pending_checkin_count"],
+                "missing_attendance_count": t["missing_attendance_count"],
+                "incomplete_attendance_count": t["incomplete_attendance_count"],
+                "payroll_state": payroll_state,
+                "eligible_for_payment": eligible_for_payment,
+                "base_salary": base_salary,
+                "estimated_salary": estimated_salary,
+                "bonus": bonus,
+                "penalty": penalty,
+                "advance_pay": advance,
                 "note": adjustment.get("note", ""),
                 "payment_status": payment.get("status", "Chưa thanh toán"),
-                "paid_at": payment.get("paid_at"), "total": total,
+                "paid_at": payment.get("paid_at"),
+                "total": total,
             })
         return output
 
     def build_payroll(self, month: str, employee_id: int | None = None) -> list[dict]:
-        cache_key = ("live", month, employee_id or 0)
+        cache_key = ("live-v2", month, employee_id or 0)
         cached = PAYROLL_CACHE.get(cache_key)
         if cached is not None:
             return cached
         start, end = month_bounds(month)
         employee_filters = {}
         attendance_filters = {"work_date": f"gte.{start}", "and": f"(work_date.lt.{end})"}
+        shift_filters = {
+            "shift_date": f"gte.{start}",
+            "and": f"(shift_date.lt.{end})",
+            "status": "in.(Đã xếp,Đã xác nhận)",
+        }
         adjustment_filters = {"month": f"eq.{month}"}
         payment_filters = {"month": f"eq.{month}"}
         if employee_id:
             employee_filters["id"] = f"eq.{employee_id}"
             attendance_filters["employee_id"] = f"eq.{employee_id}"
+            shift_filters["employee_id"] = f"eq.{employee_id}"
             adjustment_filters["employee_id"] = f"eq.{employee_id}"
             payment_filters["employee_id"] = f"eq.{employee_id}"
+
         data = parallel_calls(
-            employees=lambda: SB.select(TABLES["employees"], filters=employee_filters, order="name.asc", columns="id,code,name,role,hourly_wage,status"),
-            attendance=lambda: SB.select(TABLES["attendance"], filters=attendance_filters, columns="employee_id,hours,payable_hours,scheduled_hours,late_minutes,early_leave_minutes,overtime_minutes,work_date,check_out,status"),
-            adjustments=lambda: SB.select(TABLES["payroll_adjustments"], filters=adjustment_filters, columns="employee_id,bonus,penalty,advance_pay,note,month"),
-            payments=lambda: SB.select(TABLES["payroll_payments"], filters=payment_filters, columns="employee_id,status,paid_at,month"),
+            employees=lambda: SB.select(
+                TABLES["employees"],
+                filters=employee_filters,
+                order="name.asc",
+                columns="id,code,name,role,hourly_wage,status",
+            ),
+            shifts=lambda: SB.select(
+                TABLES["shifts"],
+                filters=shift_filters,
+                order="shift_date.asc,start_time.asc",
+                columns="id,employee_id,shift_date,start_time,end_time,status",
+            ),
+            attendance=lambda: SB.select(
+                TABLES["attendance"],
+                filters=attendance_filters,
+                columns=(
+                    "shift_id,employee_id,hours,payable_hours,scheduled_hours,"
+                    "scheduled_minutes,worked_minutes,late_minutes,early_leave_minutes,"
+                    "overtime_minutes,overtime_approved_minutes,work_date,check_in,check_out,"
+                    "check_in_at,check_out_at,status,review_status"
+                ),
+            ),
+            adjustments=lambda: SB.select(
+                TABLES["payroll_adjustments"],
+                filters=adjustment_filters,
+                columns="employee_id,bonus,penalty,advance_pay,note,month",
+            ),
+            payments=lambda: SB.select(
+                TABLES["payroll_payments"],
+                filters=payment_filters,
+                columns="employee_id,status,paid_at,month",
+            ),
         )
-        relevant_ids = {integer(x.get("employee_id")) for group in (data["attendance"], data["adjustments"], data["payments"]) for x in group}
-        employees = [x for x in data["employees"] if x.get("status") == "Đang làm" or integer(x.get("id")) in relevant_ids]
-        rows = self.payroll_from_rows(employees, data["attendance"], data["adjustments"], data["payments"])
+        relevant_ids = {
+            integer(x.get("employee_id"))
+            for group in (
+                data["shifts"],
+                data["attendance"],
+                data["adjustments"],
+                data["payments"],
+            )
+            for x in group
+        }
+        employees = [
+            x
+            for x in data["employees"]
+            if x.get("status") == "Đang làm" or integer(x.get("id")) in relevant_ids
+        ]
+        rows = self.payroll_from_rows(
+            employees,
+            data["attendance"],
+            data["adjustments"],
+            data["payments"],
+            data["shifts"],
+        )
         PAYROLL_CACHE.set(cache_key, rows, 20)
         return rows
 
@@ -1415,6 +1616,16 @@ class RumiHandler(BaseHTTPRequestHandler):
                 row["name"] = row.pop("employee_name", "")
                 row["role"] = row.pop("employee_role", "")
                 row["hours"] = num(row.get("payable_hours"))
+                row["estimated_salary"] = round(num(row.get("scheduled_hours")) * num(row.get("hourly_wage")))
+                row["scheduled_shift_count"] = integer(row.get("scheduled_shift_count"))
+                row["completed_shift_count"] = integer(row.get("completed_shift_count"), integer(row.get("attendance_count")))
+                row["upcoming_shift_count"] = integer(row.get("upcoming_shift_count"))
+                row["active_shift_count"] = integer(row.get("active_shift_count"))
+                row["pending_checkin_count"] = integer(row.get("pending_checkin_count"))
+                row["missing_attendance_count"] = integer(row.get("missing_attendance_count"))
+                row["incomplete_attendance_count"] = integer(row.get("incomplete_attendance_count"))
+                row["payroll_state"] = row.get("payroll_state") or ("Đủ dữ liệu" if num(row.get("payable_hours")) > 0 else "Chưa có công")
+                row["eligible_for_payment"] = bool(row.get("eligible_for_payment"))
                 row["payment_status"] = payment.get("status", "Chưa thanh toán")
                 row["paid_at"] = payment.get("paid_at")
                 rows.append(row)
@@ -1440,6 +1651,15 @@ class RumiHandler(BaseHTTPRequestHandler):
             "run_id": run["id"], "employee_id": x["employee_id"], "employee_code": x.get("code", ""),
             "employee_name": x.get("name", ""), "employee_role": x.get("role", ""),
             "attendance_count": x.get("attendance_count", 0),
+            "scheduled_shift_count": x.get("scheduled_shift_count", 0),
+            "completed_shift_count": x.get("completed_shift_count", 0),
+            "upcoming_shift_count": x.get("upcoming_shift_count", 0),
+            "active_shift_count": x.get("active_shift_count", 0),
+            "pending_checkin_count": x.get("pending_checkin_count", 0),
+            "missing_attendance_count": x.get("missing_attendance_count", 0),
+            "incomplete_attendance_count": x.get("incomplete_attendance_count", 0),
+            "payroll_state": x.get("payroll_state", "Chưa có dữ liệu"),
+            "eligible_for_payment": bool(x.get("eligible_for_payment")),
             "hourly_wage": x.get("hourly_wage", 0), "scheduled_hours": x.get("scheduled_hours", 0),
             "actual_hours": x.get("actual_hours", 0), "payable_hours": x.get("payable_hours", 0),
             "late_minutes": x.get("late_minutes", 0), "early_leave_minutes": x.get("early_leave_minutes", 0),
@@ -1647,7 +1867,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 auth_sessions=lambda: SB.select(TABLES["auth_sessions"], limit=1, columns="id"),
                 attendance_events=lambda: SB.select(TABLES["attendance_events"], limit=1, columns="id"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.0.0", "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.1.0", "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -2824,6 +3044,27 @@ class RumiHandler(BaseHTTPRequestHandler):
             month = str(body.get("month", ""))
             month_bounds(month)
             data = self.save_payroll_draft(user, month, str(body.get("note", "")).strip())
+            unresolved = [
+                x for x in data.get("items", [])
+                if integer(x.get("missing_attendance_count"))
+                or integer(x.get("incomplete_attendance_count"))
+                or integer(x.get("pending_checkin_count"))
+                or integer(x.get("active_shift_count"))
+                or integer(x.get("upcoming_shift_count"))
+            ]
+            if unresolved:
+                details = ", ".join(
+                    f"{x.get('name')}: {x.get('payroll_state')}"
+                    for x in unresolved[:4]
+                )
+                extra = f" và {len(unresolved)-4} nhân viên khác" if len(unresolved) > 4 else ""
+                raise APIError(
+                    f"Chưa thể chốt bảng lương vì còn ca chưa hoàn tất ({details}{extra}). "
+                    "Hãy chấm công/xử lý công hoặc chờ ca diễn ra.",
+                    409,
+                )
+            if not any(num(x.get("total")) > 0 for x in data.get("items", [])):
+                raise APIError("Chưa thể chốt vì tháng này chưa phát sinh khoản lương phải trả.", 409)
             run_id = data["run"]["id"]
             SB.update(TABLES["payroll_runs"], {"status": "Đã chốt", "locked_at": now_iso()}, {"id": f"eq.{run_id}"})
             self.audit(user, "lock", "payroll", month)
@@ -2861,6 +3102,25 @@ class RumiHandler(BaseHTTPRequestHandler):
             status = str(body.get("status", "Đã thanh toán"))
             if not employee_id or not re.fullmatch(r"\d{4}-\d{2}", month):
                 raise APIError("Thông tin thanh toán không hợp lệ")
+            if status == "Đã thanh toán":
+                run = self.payroll_run(month)
+                if not run or run.get("status") != "Đã chốt":
+                    raise APIError("Chỉ được xác nhận đã trả sau khi bảng lương tháng đã chốt.", 409)
+                items = SB.select(
+                    TABLES["payroll_items"],
+                    filters={"run_id": f"eq.{run['id']}", "employee_id": f"eq.{employee_id}"},
+                    limit=1,
+                )
+                if not items:
+                    raise APIError("Không tìm thấy phiếu lương đã chốt của nhân viên.", 404)
+                item = items[0]
+                if num(item.get("total")) <= 0:
+                    raise APIError("Phiếu lương bằng 0 nên không thể đánh dấu đã thanh toán.", 409)
+                if not bool(item.get("eligible_for_payment")):
+                    raise APIError(
+                        f"Phiếu lương chưa đủ điều kiện thanh toán: {item.get('payroll_state') or 'còn dữ liệu công chưa hoàn tất'}.",
+                        409,
+                    )
             row = SB.upsert(TABLES["payroll_payments"], {"employee_id": employee_id, "month": month, "status": status, "paid_at": now_iso() if status == "Đã thanh toán" else None}, "employee_id,month")
             self.notify_employee(employee_id, "Trạng thái lương", f"Lương tháng {month}: {status}.", "payroll", "payroll")
             self.audit(user, "payment", "payroll", employee_id, {"month": month, "status": status})

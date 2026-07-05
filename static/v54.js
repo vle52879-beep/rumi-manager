@@ -12,6 +12,12 @@
   const weekText = (start) => `${parseDate(start).toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit'})} – ${addDays(parseDate(start),6).toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'})}`;
   const currentWeekStart = () => isoLocal(monday());
   const normalizeTime = (value) => String(value || '').slice(0,5);
+  const payrollMonthLabel = (iso) => { const [y,m] = String(iso).slice(0,7).split('-'); return `Lương T${m}/${y}`; };
+  const crossMonthNotice = (start) => {
+    const first = parseDate(start), last = addDays(first, 6);
+    if (first.getMonth() === last.getMonth()) return '';
+    return `<div class="info-banner">${icons.info}<div><strong>Tuần giao tháng</strong><span>Mỗi ca được đưa vào bảng lương theo ngày làm của chính ca đó. Ví dụ ca 05-07 thuộc lương tháng 07, dù tuần bắt đầu từ tháng 06.</span></div></div>`;
+  };
   const statusTone = (status) => /Đã chốt|Đã duyệt|Đã xác nhận/.test(status) ? 'green' : /Từ chối|Đã hủy/.test(status) ? 'red' : /Chờ|Mở/.test(status) ? 'amber' : 'gray';
   state.shiftMarketWeekStart = state.shiftMarketWeekStart || state.scheduleWeekStart || currentWeekStart();
   state.shiftMarket = state.shiftMarket || null;
@@ -88,7 +94,7 @@
 
   function weekBoard(shifts, start) {
     const days = Array.from({length:7},(_,i)=>addDays(parseDate(start),i));
-    return `<div class="v54-week-board">${days.map((day)=>{ const iso=isoLocal(day); const rows=shifts.filter((x)=>x.shift_date===iso); return `<section class="v54-week-day"><header><strong>${day.toLocaleDateString('vi-VN',{weekday:'short'})}</strong><span>${day.toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit'})}</span></header>${rows.length?rows.map((x)=>`<div class="v54-week-shift"><b>${normalizeTime(x.start_time)}–${normalizeTime(x.end_time)}</b><span>${esc(x.employee_name || 'Chưa xếp')}</span><small>${esc(x.location_name || '')}</small></div>`).join(''):'<em>Trống</em>'}</section>`; }).join('')}</div>`;
+    return `<div class="v54-week-board">${days.map((day)=>{ const iso=isoLocal(day); const rows=shifts.filter((x)=>x.shift_date===iso); return `<section class="v54-week-day"><header><strong>${day.toLocaleDateString('vi-VN',{weekday:'short'})}</strong><span>${day.toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit'})}</span></header>${rows.length?rows.map((x)=>`<div class="v54-week-shift"><b>${normalizeTime(x.start_time)}–${normalizeTime(x.end_time)}</b><span>${esc(x.employee_name || 'Chưa xếp')}</span><small>${esc(x.location_name || '')}</small><small class="v61-payroll-month">${payrollMonthLabel(x.shift_date)}</small></div>`).join(''):'<em>Trống</em>'}</section>`; }).join('')}</div>`;
   }
 
   renderSchedule = async function renderShiftMarketAdmin() {
@@ -105,7 +111,7 @@
       <section class="v54-admin-grid"><div><div class="card"><div class="card-head"><div><h3>Ca đang tuyển và kết quả duyệt</h3><p>Mỗi ca chỉ chốt khi đã duyệt đủ số lượng cần.</p></div></div><div class="card-body v54-opening-list">${openings.length?openings.map(openingCard).join(''):empty('Chưa đăng ca nào','Bấm “Đăng ca mới” để nhân viên bắt đầu ứng tuyển.','calendar')}</div></div></div>
       <aside><div class="card"><div class="card-head"><div><h3>Ngày nghỉ Full-time</h3><p>Mỗi tuần phải có ít nhất 1 ngày nghỉ.</p></div></div><div class="card-body">${dayOffAdmin(data.day_offs||[])}</div></div></aside></section>
       <section class="card section-gap"><div class="card-head"><div><h3>Kiểm soát Full-time</h3><p>Cảnh báo thiếu giờ, vượt 6 ngày hoặc chưa duyệt ngày nghỉ.</p></div></div><div class="card-body">${complianceTable(compliance)}</div></section>
-      <section class="card section-gap"><div class="card-head"><div><h3>Lịch chính thức trong tuần</h3><p>Chỉ các đơn đã duyệt mới tạo ca làm và được đưa vào chấm công, tính lương.</p></div></div><div class="card-body">${weekBoard(shifts,range.start)}</div></section>`;
+      <section class="card section-gap"><div class="card-head"><div><h3>Lịch chính thức trong tuần</h3><p>Chỉ các đơn đã duyệt mới tạo ca làm. Bảng lương lấy theo ngày làm của từng ca.</p></div></div><div class="card-body">${crossMonthNotice(range.start)}${weekBoard(shifts,range.start)}</div></section>`;
   };
 
   renderAvailability = async function renderOpenShiftsEmployee() {

@@ -4,7 +4,7 @@ const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const today = () => new Date().toISOString().slice(0, 10);
 const monthNow = () => new Date().toISOString().slice(0, 7);
-const APP_VERSION = '6.0.0';
+const APP_VERSION = '6.1.0';
 const state = {
   user: null,
   page: 'dashboard',
@@ -70,7 +70,7 @@ function dateTimeVN(v) { if (!v) return '—'; return new Intl.DateTimeFormat('v
 function initials(name) { return String(name || 'R').trim().split(/\s+/).slice(-2).map(x => x[0]).join('').toUpperCase(); }
 function badge(status) {
   const s = String(status || '');
-  const cls = /Đã duyệt|Đã xếp|Đã xác nhận|Hoàn thành|Đã thanh toán|Đã mua|Đang làm/.test(s) ? 'green' : /Từ chối|Đã hủy|Nghỉ việc|Thiếu/.test(s) ? 'red' : /Chờ|Gấp|Sắp/.test(s) ? 'amber' : /Đang/.test(s) ? 'blue' : 'gray';
+  const cls = /Đã duyệt|Đã xếp|Đã xác nhận|Hoàn thành|Đã thanh toán|Đã mua|Đang làm|Đủ dữ liệu/.test(s) ? 'green' : /Từ chối|Đã hủy|Nghỉ việc|Thiếu chấm công|Thiếu giờ ra/.test(s) ? 'red' : /Chờ|Gấp|Sắp|Đến giờ chấm công|Chưa đủ điều kiện/.test(s) ? 'amber' : /Đang|Chưa đến ca/.test(s) ? 'blue' : 'gray';
   return `<span class="badge ${cls}">${esc(s || 'Không rõ')}</span>`;
 }
 function empty(title, text, icon = 'tea') { return `<div class="empty"><div>${icons[icon]}<strong>${esc(title)}</strong><p>${esc(text)}</p></div></div>`; }

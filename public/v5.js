@@ -415,7 +415,7 @@ window.RumiV5 = (() => {
   /* ------------------------------------------------------------------
      Payroll
   ------------------------------------------------------------------ */
-  renderPayroll = async function renderPayrollV53() {
+  renderPayroll = async function renderPayrollV61() {
     const data = await api(`/api/page/payroll?month=${state.month}`);
     const rows = data.items || [], run = data.run || {status:'Chưa tạo'};
     state.cache.payroll = rows; state.cache.payrollRun = run;
@@ -423,19 +423,42 @@ window.RumiV5 = (() => {
     const payrollTotal = total(rows, 'total');
     const paid = rows.filter((x) => x.payment_status === 'Đã thanh toán');
     const runStatus = run.status || 'Chưa tạo';
-    const actions = admin ? `<div class="v53-payroll-actions">${runStatus === 'Đã chốt' ? `<button class="btn secondary" data-v5-action="payroll-unlock">Mở khóa</button>` : `<button class="btn secondary" data-v5-action="payroll-generate">Tính lại</button><button class="btn" data-v5-action="payroll-lock">${icons.check} Chốt bảng lương</button>`}${exportButton('payroll', 'Xuất bảng lương')}</div>` : exportButton('payroll', 'Xuất phiếu lương');
+    const scheduledShifts = rows.reduce((sum, x) => sum + Number(x.scheduled_shift_count || 0), 0);
+    const completedShifts = rows.reduce((sum, x) => sum + Number(x.completed_shift_count || x.attendance_count || 0), 0);
+    const unresolved = rows.reduce((sum, x) => sum
+      + Number(x.upcoming_shift_count || 0)
+      + Number(x.active_shift_count || 0)
+      + Number(x.pending_checkin_count || 0)
+      + Number(x.missing_attendance_count || 0)
+      + Number(x.incomplete_attendance_count || 0), 0);
+    const actions = admin
+      ? `<div class="v53-payroll-actions">${runStatus === 'Đã chốt'
+          ? `<button class="btn secondary" data-v5-action="payroll-unlock">Mở khóa</button>`
+          : `<button class="btn secondary" data-v5-action="payroll-generate">Tính lại</button><button class="btn" data-v5-action="payroll-lock" ${unresolved ? 'disabled title="Còn ca chưa hoàn tất"' : ''}>${icons.check} Chốt bảng lương</button>`}${exportButton('payroll', 'Xuất bảng lương')}</div>`
+      : exportButton('payroll', 'Xuất phiếu lương');
+
     pageNode().innerHTML = `
-      ${intro('BẢNG LƯƠNG THÁNG', admin ? `Bảng lương ${state.month}` : 'Phiếu lương của tôi', admin ? 'Tạo bản nháp từ giờ công, kiểm tra điều chỉnh rồi chốt để giữ số liệu ổn định.' : 'Lương được tính từ giờ chấm công hợp lệ của bạn.', actions)}
-      <div class="v53-payroll-run ${runStatus === 'Đã chốt' ? 'locked' : ''}"><span>${runStatus === 'Đã chốt' ? icons.check : icons.info}</span><div><strong>Trạng thái: ${esc(runStatus)}</strong><small>${run.generated_at ? `Tính lúc ${dateTimeVN(run.generated_at)}` : 'Chưa tạo bản lưu tháng'}${run.locked_at ? ` · Chốt lúc ${dateTimeVN(run.locked_at)}` : ''}</small></div></div>
+      ${intro('BẢNG LƯƠNG THÁNG', admin ? `Bảng lương ${state.month}` : 'Phiếu lương của tôi', admin ? 'Lịch làm, chấm công và giờ tính lương được tách riêng để tránh nhầm số liệu.' : 'Lương chỉ tính từ giờ chấm công hợp lệ đã hoàn tất.', actions)}
+      <div class="info-banner">${icons.info}<div><strong>Quy tắc theo tháng</strong><span>Bảng lương ${state.month} chỉ lấy ca có ngày làm thuộc tháng này. Tuần giao tháng có thể hiển thị ca của tháng khác trong lịch tuần nhưng không cộng vào tháng đang xem.</span></div></div>
+      <div class="v53-payroll-run ${runStatus === 'Đã chốt' ? 'locked' : ''}"><span>${runStatus === 'Đã chốt' ? icons.check : icons.info}</span><div><strong>Trạng thái: ${esc(runStatus)}</strong><small>${run.generated_at ? `Tính lúc ${dateTimeVN(run.generated_at)}` : 'Chưa tạo bản lưu tháng'}${run.locked_at ? ` · Chốt lúc ${dateTimeVN(run.locked_at)}` : ''}${unresolved ? ` · Còn ${unresolved} ca chưa hoàn tất` : ''}</small></div></div>
       <section class="v5-summary-strip">
-        ${summaryItem('Giờ theo lịch', `${number(total(rows, 'scheduled_hours'), 2)} giờ`, 'Tổng ca dự kiến')}
-        ${summaryItem('Giờ tính lương', `${number(total(rows, 'payable_hours') || total(rows, 'hours'), 2)} giờ`, `${number(total(rows, 'overtime_minutes') / 60,2)} giờ tăng ca`)}
-        ${summaryItem('Tổng thực nhận', money(payrollTotal), `${rows.length} nhân viên`)}
-        ${summaryItem('Chưa thanh toán', money(payrollTotal - total(paid, 'total')), `${rows.length - paid.length} phiếu`)}
+        ${summaryItem('Ca theo lịch', scheduledShifts, `${number(total(rows, 'scheduled_hours'), 2)} giờ dự kiến`)}
+        ${summaryItem('Ca hoàn thành', completedShifts, `${number(total(rows, 'actual_hours'), 2)} giờ thực tế`)}
+        ${summaryItem('Giờ tính lương', `${number(total(rows, 'payable_hours') || total(rows, 'hours'), 2)} giờ`, `${number(total(rows, 'overtime_minutes') / 60,2)} giờ tăng ca đã duyệt`)}
+        ${summaryItem('Tổng thực nhận', money(payrollTotal), runStatus === 'Đã chốt' ? 'Số liệu đã khóa' : 'Số liệu tạm tính')}
+        ${summaryItem('Chưa thanh toán', money(payrollTotal - total(paid, 'total')), `${rows.filter((x)=>x.eligible_for_payment && x.payment_status !== 'Đã thanh toán').length} phiếu đủ điều kiện`)}
       </section>
       ${filterToolbar(`<div class="search-box">${icons.search}<input id="v5-payroll-search" placeholder="Tìm nhân viên..."></div><input type="month" id="payroll-month" value="${state.month}"><select id="v5-payroll-status"><option value="">Tất cả thanh toán</option><option>Đã thanh toán</option><option>Chưa thanh toán</option></select><span id="v5-payroll-count" class="v5-filter-count">${rows.length} phiếu</span>`)}
-      <div class="table-wrap"><table><thead><tr>${admin ? '<th>Nhân viên</th>' : ''}<th>Ca / giờ</th><th>Trễ · sớm · TC</th><th>Lương cơ bản</th><th>Điều chỉnh</th><th>Thực nhận</th><th>Thanh toán</th><th>Thao tác</th></tr></thead><tbody id="v5-payroll-rows">
-        ${rows.map((x) => `<tr data-search="${esc(normalize(`${x.name} ${x.code}`))}" data-status="${esc(x.payment_status)}">${admin ? `<td>${person(x.name, x.code)}</td>` : ''}<td><span class="cell-main">${x.attendance_count || 0} ca · ${number(x.payable_hours || x.hours,2)} giờ</span><span class="cell-sub">Lịch ${number(x.scheduled_hours,2)} giờ · ${money(x.hourly_wage)}/giờ</span></td><td><span class="v53-metric late">${x.late_minutes || 0}p trễ</span><span class="v53-metric early">${x.early_leave_minutes || 0}p sớm</span><span class="v53-metric overtime">${x.overtime_minutes || 0}p TC</span></td><td class="money"><strong>${money(x.base_salary)}</strong></td><td><span class="cell-main">+${money(x.bonus)} / -${money(Number(x.penalty||0)+Number(x.advance_pay||0))}</span><span class="cell-sub">Phạt ${money(x.penalty)} · Ứng ${money(x.advance_pay)}</span></td><td class="money"><strong>${money(x.total)}</strong></td><td>${badge(x.payment_status)}</td><td><div class="actions">${admin ? `<button class="btn small secondary" data-action="payroll-adjust" data-id="${x.employee_id}" ${runStatus === 'Đã chốt' ? 'disabled title="Mở khóa để sửa"' : ''}>${icons.edit} Điều chỉnh</button><button class="btn small ${x.payment_status === 'Đã thanh toán' ? 'secondary' : 'success'}" data-action="payroll-pay" data-id="${x.employee_id}" data-status="${x.payment_status === 'Đã thanh toán' ? 'Chưa thanh toán' : 'Đã thanh toán'}">${x.payment_status === 'Đã thanh toán' ? 'Hoàn tác' : 'Đã trả'}</button>` : ''}<button class="btn small secondary" data-v5-action="payroll-slip" data-id="${x.employee_id}">Phiếu lương</button></div></td></tr>`).join('') || `<tr><td colspan="8">${empty('Chưa có bảng lương', 'Hãy chấm công hoàn thành rồi bấm Tính lại bảng lương.', 'money')}</td></tr>`}
+      <div class="table-wrap"><table><thead><tr>${admin ? '<th>Nhân viên</th>' : ''}<th>Lịch / công</th><th>Tình trạng</th><th>Trễ · sớm · TC</th><th>Lương cơ bản</th><th>Điều chỉnh</th><th>Thực nhận</th><th>Thanh toán</th><th>Thao tác</th></tr></thead><tbody id="v5-payroll-rows">
+        ${rows.map((x) => {
+          const paidStatus = x.payment_status === 'Đã thanh toán';
+          const canPay = runStatus === 'Đã chốt' && Boolean(x.eligible_for_payment) && Number(x.total || 0) > 0;
+          const displayPayment = paidStatus ? 'Đã thanh toán' : (canPay ? 'Chưa thanh toán' : 'Chưa đủ điều kiện');
+          const payButton = paidStatus
+            ? `<button class="btn small secondary" data-action="payroll-pay" data-id="${x.employee_id}" data-status="Chưa thanh toán">Hoàn tác</button>`
+            : `<button class="btn small success" data-action="payroll-pay" data-id="${x.employee_id}" data-status="Đã thanh toán" ${canPay ? '' : 'disabled title="Chỉ trả sau khi bảng lương đã chốt và công đã hoàn tất"'}>Đã trả</button>`;
+          return `<tr data-search="${esc(normalize(`${x.name} ${x.code}`))}" data-status="${esc(x.payment_status)}">${admin ? `<td>${person(x.name, x.code)}</td>` : ''}<td><span class="cell-main">${x.scheduled_shift_count || 0} ca lịch · ${number(x.scheduled_hours,2)} giờ</span><span class="cell-sub">${x.completed_shift_count || x.attendance_count || 0} ca hoàn tất · ${number(x.actual_hours,2)} giờ thực tế · ${number(x.payable_hours || x.hours,2)} giờ tính lương</span></td><td>${badge(x.payroll_state || 'Chưa có dữ liệu')}${x.missing_attendance_count ? `<span class="cell-sub">${x.missing_attendance_count} ca thiếu công</span>` : ''}${x.incomplete_attendance_count ? `<span class="cell-sub">${x.incomplete_attendance_count} ca thiếu giờ ra</span>` : ''}</td><td><span class="v53-metric late">${x.late_minutes || 0}p trễ</span><span class="v53-metric early">${x.early_leave_minutes || 0}p sớm</span><span class="v53-metric overtime">${x.overtime_minutes || 0}p TC</span></td><td class="money"><strong>${money(x.base_salary)}</strong><span class="cell-sub">Dự kiến theo lịch ${money(x.estimated_salary || Number(x.scheduled_hours||0)*Number(x.hourly_wage||0))}</span></td><td><span class="cell-main">+${money(x.bonus)} / -${money(Number(x.penalty||0)+Number(x.advance_pay||0))}</span><span class="cell-sub">Phạt ${money(x.penalty)} · Ứng ${money(x.advance_pay)}</span></td><td class="money"><strong>${money(x.total)}</strong></td><td>${badge(displayPayment)}</td><td><div class="actions">${admin ? `<button class="btn small secondary" data-action="payroll-adjust" data-id="${x.employee_id}" ${runStatus === 'Đã chốt' ? 'disabled title="Mở khóa để sửa"' : ''}>${icons.edit} Điều chỉnh</button>${payButton}` : ''}<button class="btn small secondary" data-v5-action="payroll-slip" data-id="${x.employee_id}">${runStatus === 'Đã chốt' ? 'Phiếu lương' : 'Phiếu tạm tính'}</button></div></td></tr>`;
+        }).join('') || `<tr><td colspan="9">${empty('Chưa có bảng lương', 'Hãy tạo lịch, hoàn tất chấm công rồi bấm Tính lại bảng lương.', 'money')}</td></tr>`}
       </tbody></table></div>`;
   };
 
@@ -638,9 +661,9 @@ window.RumiV5 = (() => {
     }
     if (kind === 'payroll') {
       const rows = state.cache.payroll || [];
-      const body = rows.map((x) => [x.code,x.name,x.role,x.attendance_count || 0,x.scheduled_hours,x.actual_hours,x.payable_hours || x.hours,x.late_minutes,x.early_leave_minutes,x.overtime_minutes,x.hourly_wage,x.base_salary,x.bonus,x.penalty,x.advance_pay,x.total,x.payment_status,x.note]);
-      body.push(['','TỔNG','','',total(rows,'scheduled_hours'),total(rows,'actual_hours'),total(rows,'payable_hours') || total(rows,'hours'),total(rows,'late_minutes'),total(rows,'early_leave_minutes'),total(rows,'overtime_minutes'),'','',total(rows,'bonus'),total(rows,'penalty'),total(rows,'advance_pay'),total(rows,'total'),'','']);
-      return downloadCSV(`rumi-bang-luong-${state.month}.csv`, ['Mã','Nhân viên','Vị trí','Số ca','Giờ theo lịch','Giờ thực tế','Giờ tính lương','Phút đi trễ','Phút về sớm','Phút tăng ca','Lương/giờ','Lương cơ bản','Thưởng','Phạt','Tạm ứng','Thực nhận','Thanh toán','Ghi chú'], body);
+      const body = rows.map((x) => [x.code,x.name,x.role,x.scheduled_shift_count || 0,x.completed_shift_count || x.attendance_count || 0,x.scheduled_hours,x.actual_hours,x.payable_hours || x.hours,x.payroll_state,x.missing_attendance_count || 0,x.incomplete_attendance_count || 0,x.late_minutes,x.early_leave_minutes,x.overtime_minutes,x.hourly_wage,x.estimated_salary || Number(x.scheduled_hours||0)*Number(x.hourly_wage||0),x.base_salary,x.bonus,x.penalty,x.advance_pay,x.total,x.payment_status,x.note]);
+      body.push(['','TỔNG','','',total(rows,'completed_shift_count') || total(rows,'attendance_count'),total(rows,'scheduled_hours'),total(rows,'actual_hours'),total(rows,'payable_hours') || total(rows,'hours'),'','','',total(rows,'late_minutes'),total(rows,'early_leave_minutes'),total(rows,'overtime_minutes'),'',rows.reduce((a,x)=>a+Number(x.estimated_salary || Number(x.scheduled_hours||0)*Number(x.hourly_wage||0)),0),'',total(rows,'bonus'),total(rows,'penalty'),total(rows,'advance_pay'),total(rows,'total'),'','']);
+      return downloadCSV(`rumi-bang-luong-${state.month}.csv`, ['Mã','Nhân viên','Vị trí','Ca theo lịch','Ca hoàn thành','Giờ theo lịch','Giờ thực tế','Giờ tính lương','Tình trạng công','Ca thiếu chấm công','Ca thiếu giờ ra','Phút đi trễ','Phút về sớm','Phút tăng ca','Lương/giờ','Lương dự kiến theo lịch','Lương cơ bản tính công','Thưởng','Phạt','Tạm ứng','Thực nhận','Thanh toán','Ghi chú'], body);
     }
     if (kind === 'inventory') {
       const rows = state.cache.inventory || [];
