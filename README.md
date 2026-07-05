@@ -1,20 +1,26 @@
-# RUMI Manager 6.4 — Weekly Shift Registration
+# RUMI Manager 6.4.1 — Đăng ký 1 hoặc 2 ca/ngày
 
-Phiên bản này thay luồng đăng ký từng ca rời rạc bằng một đơn đăng ký cho cả tuần.
+Bản nâng cấp của luồng đăng ký lịch tuần.
 
 ## Điểm mới
 
-- Admin đăng lịch tuần với hai ca cố định **09:00–17:00** và **17:00–23:00**.
-- Có thể chọn những ngày cửa hàng mở ca và số người cần cho từng loại ca.
-- Nhân viên chọn một trong ba trạng thái cho mỗi ngày: ca ngày, ca tối hoặc nghỉ.
-- Full-time bắt buộc chọn đúng 6 ngày làm và 1 ngày nghỉ.
-- Part-time chọn từ một ngày trở lên.
-- Một đơn tuần nhóm toàn bộ các ngày, tổng giờ và ngày nghỉ.
-- Admin duyệt toàn bộ, duyệt từng ngày, đưa vào danh sách chờ hoặc từ chối.
-- Nếu một ca đã đủ người, ngày đó được chuyển danh sách chờ thay vì làm hỏng cả đơn.
-- Chỉ ca được duyệt mới tạo lịch chính thức, chấm công và tính lương.
-- Giữ nguyên chấm công GPS, cảnh báo vắng ca, bảng lương và xuất PDF/Excel của RUMI 6.2.
+- Mỗi ngày nhân viên có thể chọn:
+  - Ca ngày **09:00–17:00**.
+  - Ca tối **17:00–23:00**.
+  - Hoặc chọn **cả hai ca**.
+  - Hoặc nghỉ/không đăng ký.
+- Có nút **Tuần sau** để chuyển nhanh sang lịch tuần kế tiếp.
+- Full-time vẫn phải đăng ký đúng **6 ngày làm và 1 ngày nghỉ**, nhưng mỗi ngày được chọn 1 hoặc 2 ca.
+- Part-time chọn bất kỳ ca nào phù hợp.
+- Đơn hiển thị rõ số **ngày / ca / giờ**.
+- Admin duyệt từng ca hoặc duyệt toàn bộ các ca còn phù hợp.
+- Ca đôi chỉ được tạo khi đúng cặp 09–17 và 17–23 trong cùng một đơn tuần.
+- Giới hạn giờ tuần, ngày nghỉ, nghỉ phép, trùng ca và sức chứa ca vẫn được kiểm tra.
 
-## Cài đặt
+## Nâng cấp từ 6.4
 
-Đọc `UPGRADE_V64.md` và `DEPLOY_VERCEL.md`.
+Đọc `UPGRADE_V641.md`.
+
+## Triển khai Vercel
+
+Đọc `DEPLOY_VERCEL.md`.

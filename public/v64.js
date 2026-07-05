@@ -1,8 +1,8 @@
 'use strict';
 
-/* RUMI 6.4 — đăng ký ca theo tuần, 2 ca cố định 09–17 và 17–23. */
+/* RUMI 6.4.1 — đăng ký tuần sau, cho phép chọn 1 hoặc 2 ca mỗi ngày. */
 (() => {
-  const VERSION = '6.4.0';
+  const VERSION = '6.4.1';
   const SHIFT_SPECS = [
     { code: 'CA_09_17', label: 'Ca ngày', start: '09:00', end: '17:00', hours: 8, tone: 'day' },
     { code: 'CA_17_23', label: 'Ca tối', start: '17:00', end: '23:00', hours: 6, tone: 'night' },
@@ -59,6 +59,7 @@
       <button class="btn small secondary" data-v64-action="week" data-step="-7">‹</button>
       <div><span>Tuần làm việc</span><strong>${weekLabel64(range.start)}</strong></div>
       <button class="btn small secondary" data-v64-action="week-today">Tuần này</button>
+      <button class="btn small secondary" data-v64-action="week-next">Tuần sau</button>
       <button class="btn small secondary" data-v64-action="week" data-step="7">›</button>
     </div>`;
   }
@@ -155,8 +156,8 @@
         <div class="v64-request-state">${badge(request.status)}</div>
       </header>
       <div class="v64-request-metrics">
-        <span><small>Đăng ký</small><strong>${request.selected_days || 0} ngày · ${number(request.selected_hours || 0, 1)} giờ</strong></span>
-        <span><small>Đã duyệt</small><strong>${request.approved_days || 0} ngày</strong></span>
+        <span><small>Đăng ký</small><strong>${request.selected_days || 0} ngày · ${request.selected_shifts || (request.items || []).length} ca · ${number(request.selected_hours || 0, 1)} giờ</strong></span>
+        <span><small>Đã duyệt</small><strong>${request.approved_shifts || 0} ca / ${request.approved_days || 0} ngày</strong></span>
         <span><small>Ngày nghỉ</small><strong>${request.requested_day_off ? dateVN(request.requested_day_off) : 'Không cố định'}</strong></span>
         <span class="${shortfall > 0 && request.employment_type === 'Full-time' ? 'warn' : ''}"><small>So với mục tiêu</small><strong>${shortfall > 0 ? `Thiếu ${number(shortfall, 1)} giờ` : 'Đạt / vượt'}</strong></span>
       </div>
@@ -180,7 +181,7 @@
     if (!state.v64LocationId || !locations.some((x) => Number(x.id) === Number(state.v64LocationId))) state.v64LocationId = locations[0]?.id || null;
     const requests = data.weekly_requests || [];
     const pendingCount = requests.filter((x) => ['Chờ duyệt', 'Duyệt một phần'].includes(x.status)).length;
-    $('#page').innerHTML = `${intro('LỊCH LÀM THEO TUẦN', 'Đăng 2 ca cố định và duyệt một đơn cho cả tuần', 'Admin mở ca 09:00–17:00 và 17:00–23:00. Nhân viên chọn lịch cả tuần, sau đó admin duyệt toàn bộ hoặc từng ngày.', `<button class="btn" data-v64-action="publish-week">${icons.plus} Đăng lịch tuần</button>`)}
+    $('#page').innerHTML = `${intro('LỊCH LÀM THEO TUẦN', 'Đăng 2 ca cố định và duyệt một đơn cho cả tuần', 'Admin mở ca 09:00–17:00 và 17:00–23:00. Nhân viên có thể chọn một hoặc cả hai ca trong ngày, kể cả tuần sau.', `<button class="btn" data-v64-action="publish-week">${icons.plus} Đăng lịch tuần</button>`)}
       ${weekControls64()}
       <section class="v64-admin-summary">
         <div><small>Đơn đăng ký tuần</small><strong>${requests.length}</strong></div>
@@ -194,7 +195,10 @@
 
   function requestSelectionMap(request) {
     const map = new Map();
-    (request?.items || []).forEach((item) => map.set(item.work_date, String(item.opening_id)));
+    (request?.items || []).forEach((item) => {
+      if (!map.has(item.work_date)) map.set(item.work_date, new Set());
+      map.get(item.work_date).add(String(item.opening_id));
+    });
     return map;
   }
 
@@ -206,24 +210,24 @@
     return `<div class="v64-weekly-grid">${Array.from({ length: 7 }, (_, index) => {
       const date = isoLocal(addDays64(parseDate(range.start), index));
       const openings = grouped.get(date) || [];
-      const current = selected.get(date) || 'off';
-      return `<section class="v64-register-day">
-        <header><strong>${dayLabel(date)}</strong><span>${current === 'off' ? 'Ngày nghỉ / không đăng ký' : 'Đã chọn ca'}</span></header>
+      const current = selected.get(date) || new Set();
+      const selectedCount = current.size;
+      return `<section class="v64-register-day" data-v64-day="${date}">
+        <header><strong>${dayLabel(date)}</strong><span data-v64-day-state>${selectedCount ? `Đã chọn ${selectedCount} ca` : 'Ngày nghỉ / không đăng ký'}</span></header>
         <div class="v64-shift-options">
           ${SHIFT_SPECS.map((spec) => {
             const opening = openings.find((x) => time5(x.start_time) === spec.start && time5(x.end_time) === spec.end);
             const disabled = locked || !opening || opening.status !== 'Mở đăng ký' || opening.remaining_slots === 0 && !opening.my_application;
-            const checked = opening && current === String(opening.id);
+            const checked = opening && current.has(String(opening.id));
             const note = !opening ? 'Chưa mở' : opening.status !== 'Mở đăng ký' ? opening.status : `Cần ${opening.required_count} · còn ${opening.remaining_slots}`;
             return `<label class="v64-shift-option ${spec.tone} ${disabled ? 'disabled' : ''}">
-              <input type="radio" name="day_${date}" value="${opening?.id || ''}" data-hours="${spec.hours}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+              <input type="checkbox" data-v64-opening data-date="${date}" value="${opening?.id || ''}" data-hours="${spec.hours}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
               <span><b>${spec.label}</b><strong>${spec.start}–${spec.end}</strong><small>${esc(note)}</small></span>
             </label>`;
           }).join('')}
-          <label class="v64-shift-option off ${locked ? 'disabled' : ''}">
-            <input type="radio" name="day_${date}" value="off" data-hours="0" ${current === 'off' ? 'checked' : ''} ${locked ? 'disabled' : ''}>
-            <span><b>Nghỉ</b><strong>Không đăng ký</strong><small>Không xếp ca ngày này</small></span>
-          </label>
+          <button type="button" class="v64-shift-off ${locked ? 'disabled' : ''}" data-v64-action="day-off" data-date="${date}" ${locked ? 'disabled' : ''}>
+            <b>Nghỉ ngày này</b><span>Bỏ chọn cả hai ca</span>
+          </button>
         </div>
       </section>`;
     }).join('')}</div>`;
@@ -233,9 +237,9 @@
     if (!request) return '<div class="info-banner"><div><strong>Chưa gửi đơn tuần</strong><span>Chọn một ca hoặc Nghỉ cho từng ngày rồi gửi một lần.</span></div></div>';
     return `<div class="v64-own-request ${statusClass(request.status)}">
       <div><small>Trạng thái đơn</small>${badge(request.status)}</div>
-      <div><small>Đã chọn</small><strong>${request.selected_days} ngày · ${number(request.selected_hours, 1)} giờ</strong></div>
+      <div><small>Đã chọn</small><strong>${request.selected_days} ngày · ${request.selected_shifts || (request.items || []).length} ca · ${number(request.selected_hours, 1)} giờ</strong></div>
       ${employmentType === 'Full-time' ? `<div><small>Ngày nghỉ</small><strong>${request.requested_day_off ? dateVN(request.requested_day_off) : 'Chưa xác định'}</strong></div>` : ''}
-      <div><small>Kết quả</small><strong>${request.approved_days || 0} duyệt · ${request.waitlist_days || 0} chờ · ${request.rejected_days || 0} từ chối</strong></div>
+      <div><small>Kết quả</small><strong>${request.approved_shifts || 0} duyệt · ${request.waitlist_shifts || 0} chờ · ${request.rejected_shifts || 0} từ chối</strong></div>
     </div>`;
   }
 
@@ -251,7 +255,7 @@
     if (!state.v64LocationId || !locations.some((x) => Number(x.id) === Number(state.v64LocationId))) state.v64LocationId = locations[0]?.id || null;
     const employmentType = state.user.employment_type || 'Part-time';
     const locked = request && !request.can_edit;
-    $('#page').innerHTML = `${intro('ĐĂNG KÝ LỊCH CẢ TUẦN', 'Chọn ca cho 7 ngày và gửi một đơn', employmentType === 'Full-time' ? 'Full-time phải chọn đúng 6 ngày làm và 1 ngày nghỉ. Admin sẽ duyệt toàn bộ hoặc từng ngày.' : 'Part-time chọn những ngày có thể làm; mỗi ngày tối đa một ca.', '')}
+    $('#page').innerHTML = `${intro('ĐĂNG KÝ LỊCH CẢ TUẦN', 'Chọn 1 hoặc 2 ca mỗi ngày và gửi một đơn', employmentType === 'Full-time' ? 'Full-time đăng ký đúng 6 ngày làm và 1 ngày nghỉ; mỗi ngày có thể chọn ca ngày, ca tối hoặc cả hai.' : 'Part-time chọn các ca có thể làm; một ngày được chọn một hoặc cả hai ca.', '')}
       ${weekControls64()}
       <section class="v64-employee-toolbar">
         <div class="field"><label>Cửa hàng đăng ký</label><select data-v64-location-employee ${locked ? 'disabled' : ''}>${locations.map((x) => `<option value="${x.id}" ${Number(x.id) === Number(state.v64LocationId) ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
@@ -261,7 +265,7 @@
         <input type="hidden" name="week_start" value="${range.start}">
         ${employeeWeeklyGrid(data, state.v64LocationId, request)}
         <div class="v64-week-submit">
-          <div class="v64-live-summary"><small>Lịch đang chọn</small><strong data-v64-selected-summary>0 ngày · 0 giờ</strong><span data-v64-rule-hint>${employmentType === 'Full-time' ? 'Yêu cầu: đúng 6 ngày làm, 1 ngày nghỉ.' : 'Chọn ít nhất một ngày.'}</span></div>
+          <div class="v64-live-summary"><small>Lịch đang chọn</small><strong data-v64-selected-summary>0 ngày · 0 giờ</strong><span data-v64-rule-hint>${employmentType === 'Full-time' ? 'Yêu cầu: đúng 6 ngày làm, 1 ngày nghỉ; mỗi ngày 1 hoặc 2 ca.' : 'Chọn ít nhất một ca.'}</span></div>
           <div class="field"><label>Ghi chú cho quản lý</label><input name="employee_note" value="${esc(request?.employee_note || '')}" placeholder="Ví dụ: ưu tiên ca tối cuối tuần" ${locked ? 'disabled' : ''}></div>
           <div class="actions">
             ${request && request.can_edit ? `<button type="button" class="btn secondary" data-v64-action="withdraw-request" data-id="${request.id}">Rút đơn</button>` : ''}
@@ -276,14 +280,21 @@
   function updateSelectedSummary() {
     const form = document.querySelector('[data-form="v64-submit-week"]');
     if (!form) return;
-    const selected = [...form.querySelectorAll('input[type="radio"]:checked')].filter((x) => x.value && x.value !== 'off');
+    const selected = [...form.querySelectorAll('input[data-v64-opening]:checked')];
+    const distinctDays = new Set(selected.map((input) => input.dataset.date));
     const hours = selected.reduce((sum, input) => sum + Number(input.dataset.hours || 0), 0);
     const output = form.querySelector('[data-v64-selected-summary]');
-    if (output) output.textContent = `${selected.length} ngày · ${hours} giờ`;
+    if (output) output.textContent = `${distinctDays.size} ngày · ${selected.length} ca · ${hours} giờ`;
+    form.querySelectorAll('[data-v64-day]').forEach((dayCard) => {
+      const count = dayCard.querySelectorAll('input[data-v64-opening]:checked').length;
+      const stateEl = dayCard.querySelector('[data-v64-day-state]');
+      if (stateEl) stateEl.textContent = count ? `Đã chọn ${count} ca${count === 2 ? ' · ca đôi' : ''}` : 'Ngày nghỉ / không đăng ký';
+      dayCard.classList.toggle('double-selected', count === 2);
+    });
     const hint = form.querySelector('[data-v64-rule-hint]');
     if (hint && state.user.employment_type === 'Full-time') {
-      hint.textContent = selected.length === 6 ? 'Đủ 6 ngày làm và 1 ngày nghỉ.' : `Cần chọn thêm/bớt để đủ 6 ngày (hiện ${selected.length}).`;
-      hint.classList.toggle('ok', selected.length === 6);
+      hint.textContent = distinctDays.size === 6 ? `Đủ 6 ngày làm và 1 ngày nghỉ · ${selected.length} ca.` : `Cần chọn đủ 6 ngày làm (hiện ${distinctDays.size} ngày).`;
+      hint.classList.toggle('ok', distinctDays.size === 6);
     }
   }
 
@@ -304,11 +315,10 @@
         return renderSchedule();
       }
       if (type === 'v64-submit-week') {
-        const selections = [...form.querySelectorAll('input[type="radio"]:checked')]
-          .map((input) => input.value)
-          .filter((value) => value && value !== 'off')
-          .map(Number);
-        if (state.user.employment_type === 'Full-time' && selections.length !== 6) throw new Error('Full-time phải chọn đúng 6 ngày làm và nghỉ 1 ngày');
+        const selectedInputs = [...form.querySelectorAll('input[data-v64-opening]:checked')];
+        const selections = selectedInputs.map((input) => Number(input.value)).filter(Boolean);
+        const selectedDays = new Set(selectedInputs.map((input) => input.dataset.date));
+        if (state.user.employment_type === 'Full-time' && selectedDays.size !== 6) throw new Error('Full-time phải đăng ký đúng 6 ngày làm và nghỉ 1 ngày; mỗi ngày có thể chọn 1 hoặc 2 ca');
         if (!selections.length) throw new Error('Hãy chọn ít nhất một ca trong tuần');
         await api('/api/shift-market/weekly-requests', {
           method: 'POST',
@@ -358,6 +368,17 @@
         state.scheduleWeekStart = state.shiftMarketWeekStart;
         return state.user.role === 'admin' ? renderSchedule() : renderAvailability();
       }
+      if (action === 'week-next') {
+        state.shiftMarketWeekStart = isoLocal(addDays64(parseDate(currentWeekStart64()), 7));
+        state.scheduleWeekStart = state.shiftMarketWeekStart;
+        return state.user.role === 'admin' ? renderSchedule() : renderAvailability();
+      }
+      if (action === 'day-off') {
+        const day = button.closest('[data-v64-day]');
+        day?.querySelectorAll('input[data-v64-opening]').forEach((input) => { input.checked = false; });
+        updateSelectedSummary();
+        return;
+      }
       if (action === 'item-status') {
         await api('/api/shift-market/applications/status', { method: 'POST', body: { id: Number(button.dataset.id), status: button.dataset.status } });
         toast(`Đã chuyển ngày làm sang ${button.dataset.status}`);
@@ -383,5 +404,5 @@
     }
   });
 
-  window.RumiV64 = { version: VERSION, shiftSpecs: SHIFT_SPECS };
+  window.RumiV64 = { version: VERSION, shiftSpecs: SHIFT_SPECS, allowDoubleShift: true, nextWeekRegistration: true };
 })();

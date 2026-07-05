@@ -1,15 +1,6 @@
-# Triển khai RUMI 6.4 lên Vercel
+# Deploy RUMI 6.4.1 lên Vercel
 
-## 1. Chạy SQL v6.4
-
-```bash
-cd ~/Downloads/RUMI-Manager-Supabase-v6.4-WEEKLY-SHIFT-REGISTRATION
-pbcopy < sql/SUPABASE_RUMI_V6_4_WEEKLY_REGISTRATION.sql
-```
-
-Dán vào **Supabase SQL Editor** và nhấn **Run**.
-
-## 2. Ghi đè mã nguồn dự án đang kết nối Vercel
+Sau khi đã chạy SQL `SUPABASE_RUMI_V6_4_1_DOUBLE_SHIFT.sql`, ghi đè dự án đang kết nối Vercel rồi push:
 
 ```bash
 cd ~/Downloads
@@ -17,22 +8,14 @@ cd ~/Downloads
 rsync -av --delete \
   --exclude='.git' \
   --exclude='.env' \
-  RUMI-Manager-Supabase-v6.4-WEEKLY-SHIFT-REGISTRATION/ \
+  RUMI-Manager-Supabase-v6.4.1-DOUBLE-SHIFT/ \
   RUMI-Manager-Supabase-v4.4-Vercel/
 
 cd ~/Downloads/RUMI-Manager-Supabase-v4.4-Vercel
 
 git add -A
-git commit -m "Upgrade RUMI 6.4 weekly shift registration"
+git commit -m "Upgrade RUMI 6.4.1 double shift and next week registration"
 git push
 ```
 
-## 3. Kiểm tra
-
-Chờ Vercel báo **Ready**, sau đó mở:
-
-```text
-https://rumi-manager-test.vercel.app/api/health
-```
-
-Sau đó tải lại mạnh bằng **Command + Shift + R**.
+Chờ Vercel báo **Ready**, sau đó tải lại cứng bằng `Command + Shift + R`.

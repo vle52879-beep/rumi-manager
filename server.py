@@ -724,7 +724,7 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/6.1.0"
+    server_version = "RUMI/6.4.1"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -1278,7 +1278,7 @@ class RumiHandler(BaseHTTPRequestHandler):
         output.sort(key=lambda x: (priority.get(x["state"], 9), -integer(x.get("score")), num(x.get("week_hours")), x["name"] or ""))
         return output
 
-    def employee_shift_rule(self, employee: dict, opening: dict, shifts: list[dict], leaves: list[dict], day_offs: list[dict]) -> dict:
+    def employee_shift_rule(self, employee: dict, opening: dict, shifts: list[dict], leaves: list[dict], day_offs: list[dict], allow_fixed_double: bool = False) -> dict:
         """Return eligibility, workload and a transparent ranking score for one opening."""
         eid = integer(employee.get("id"))
         work_date = str(opening.get("work_date"))
@@ -1322,8 +1322,15 @@ class RumiHandler(BaseHTTPRequestHandler):
         conflict = next((x for x in day_rows if overlaps(x["start_time"], x["end_time"], start, end)), None)
         if conflict:
             reasons.append(f"Trùng ca {str(conflict.get('start_time'))[:5]}–{str(conflict.get('end_time'))[:5]}")
-        if day_hours + duration > max_daily + 0.001:
-            reasons.append(f"Vượt {number_text(max_daily)} giờ/ngày")
+        # Đơn tuần được phép chọn cả hai ca cố định liền nhau trong cùng ngày.
+        # Quy tắc này chỉ nới giới hạn ngày lên 14 giờ cho đúng cặp 09–17 + 17–23;
+        # giới hạn giờ tuần và mọi kiểm tra nghỉ/trùng ca vẫn giữ nguyên.
+        fixed_pair = {(start, end)}
+        fixed_pair.update({(str(x.get("start_time"))[:5], str(x.get("end_time"))[:5]) for x in day_rows})
+        is_weekly_double = allow_fixed_double and {("09:00", "17:00"), ("17:00", "23:00")}.issubset(fixed_pair)
+        effective_daily_limit = max(max_daily, 14) if is_weekly_double else max_daily
+        if day_hours + duration > effective_daily_limit + 0.001:
+            reasons.append(f"Vượt {number_text(effective_daily_limit)} giờ/ngày")
         if week_hours + duration > max_weekly + 0.001:
             reasons.append(f"Vượt {number_text(max_weekly)} giờ/tuần")
         if employment_type == "Full-time" and len(future_days) > max_work_days:
@@ -1381,8 +1388,12 @@ class RumiHandler(BaseHTTPRequestHandler):
             location = l_map.get(integer(row.get("location_id")), {})
             request_items = sorted(grouped.get(integer(row.get("id")), []), key=lambda x: (str(x.get("work_date")), str(x.get("start_time"))))
             counts = defaultdict(int)
+            status_dates: dict[str, set[str]] = defaultdict(set)
             for item in request_items:
-                counts[str(item.get("status") or "Chờ duyệt")] += 1
+                item_status = str(item.get("status") or "Chờ duyệt")
+                counts[item_status] += 1
+                status_dates[item_status].add(str(item.get("work_date")))
+            selected_dates = {str(x.get("work_date")) for x in request_items}
             row.update({
                 "employee_name": employee.get("name"),
                 "employee_code": employee.get("code"),
@@ -1393,11 +1404,17 @@ class RumiHandler(BaseHTTPRequestHandler):
                 "location_name": location.get("name"),
                 "location_address": location.get("address"),
                 "items": request_items,
-                "pending_days": counts["Chờ duyệt"],
-                "approved_days": counts["Đã duyệt"],
-                "waitlist_days": counts["Danh sách chờ"],
-                "rejected_days": counts["Từ chối"],
-                "withdrawn_days": counts["Đã rút"],
+                "selected_days": len(selected_dates),
+                "selected_shifts": len(request_items),
+                "pending_days": len(status_dates["Chờ duyệt"]),
+                "approved_days": len(status_dates["Đã duyệt"]),
+                "waitlist_days": len(status_dates["Danh sách chờ"]),
+                "rejected_days": len(status_dates["Từ chối"]),
+                "withdrawn_days": len(status_dates["Đã rút"]),
+                "pending_shifts": counts["Chờ duyệt"],
+                "approved_shifts": counts["Đã duyệt"],
+                "waitlist_shifts": counts["Danh sách chờ"],
+                "rejected_shifts": counts["Từ chối"],
                 "can_edit": counts["Đã duyệt"] == 0 and row.get("status") not in {"Đã rút"},
             })
             output.append(row)
@@ -1456,7 +1473,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 ranked = []
                 for app in apps:
                     employee = e_map.get(integer(app.get("employee_id")), {})
-                    rule = self.employee_shift_rule(employee, item, data["shifts"], data["leaves"], data["day_offs"])
+                    rule = self.employee_shift_rule(employee, item, data["shifts"], data["leaves"], data["day_offs"], allow_fixed_double=True)
                     enriched = dict(app)
                     enriched.update(rule)
                     ranked.append(enriched)
@@ -1466,7 +1483,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 own = next((x for x in apps if integer(x.get("employee_id")) == integer(user.get("employee_id"))), None)
                 employee = user.get("employee") or {}
                 item["my_application"] = own
-                item["rule"] = self.employee_shift_rule(employee, item, data["shifts"], data["leaves"], data["day_offs"])
+                item["rule"] = self.employee_shift_rule(employee, item, data["shifts"], data["leaves"], data["day_offs"], allow_fixed_double=True)
             output.append(item)
         compliance = self.full_time_compliance(start, end, data=data) if user.get("role") == "admin" else []
         own_day_offs = data["day_offs"] if user.get("role") == "admin" else [x for x in data["day_offs"] if integer(x.get("employee_id")) == integer(user.get("employee_id"))]
@@ -1546,7 +1563,7 @@ class RumiHandler(BaseHTTPRequestHandler):
             leaves=lambda: SB.select(TABLES["leaves"], filters={"status": "eq.Đã duyệt", "start_date": f"lte.{opening['work_date']}", "and": f"(end_date.gte.{opening['work_date']})"}),
             day_offs=lambda: SB.select(TABLES["day_offs"], filters={"week_start": f"eq.{week_start.isoformat()}"}),
         )
-        rule = self.employee_shift_rule(employee, opening, data["shifts"], data["leaves"], data["day_offs"])
+        rule = self.employee_shift_rule(employee, opening, data["shifts"], data["leaves"], data["day_offs"], allow_fixed_double=bool(application.get("weekly_request_id")))
         if not rule["allowed"]:
             raise APIError(rule["reason"], 409)
         existing = SB.select(TABLES["shifts"], filters={"application_id": f"eq.{application_id}"}, limit=1)
@@ -2186,7 +2203,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 weekly_requests=lambda: SB.select(TABLES["weekly_requests"], limit=1, columns="id"),
                 weekly_request_items=lambda: SB.select(TABLES["weekly_request_items"], limit=1, columns="id"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.0", "weekly_shift_registration": True, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.1", "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -2864,12 +2881,15 @@ class RumiHandler(BaseHTTPRequestHandler):
             employee = user.get("employee") or {}
             employment_type = employee.get("employment_type") or "Part-time"
             selected_dates = {str(x.get("work_date")) for x in openings}
-            if len(selected_dates) != len(openings):
-                raise APIError("Mỗi ngày chỉ được chọn một ca")
-            if employment_type == "Full-time" and len(openings) != 6:
-                raise APIError("Full-time phải chọn đúng 6 ngày làm và nghỉ 1 ngày")
+            selected_by_date = defaultdict(list)
+            for opening in openings:
+                selected_by_date[str(opening.get("work_date"))].append(opening)
+            if any(len(rows) > 2 for rows in selected_by_date.values()):
+                raise APIError("Mỗi ngày chỉ được đăng ký tối đa 2 ca")
+            if employment_type == "Full-time" and len(selected_dates) != 6:
+                raise APIError("Full-time phải đăng ký đúng 6 ngày làm và nghỉ 1 ngày; mỗi ngày có thể chọn 1 hoặc 2 ca")
             if employment_type != "Full-time" and len(openings) < 1:
-                raise APIError("Hãy chọn ít nhất một ngày làm")
+                raise APIError("Hãy chọn ít nhất một ca trong tuần")
             week_end = week_start + timedelta(days=6)
             for opening in openings:
                 work_date = datetime.strptime(str(opening.get("work_date")), "%Y-%m-%d").date()
@@ -2897,7 +2917,7 @@ class RumiHandler(BaseHTTPRequestHandler):
             day_offs = [x for x in data["day_offs"] if integer(x.get("employee_id")) != integer(user.get("employee_id"))]
             simulated = list(data["shifts"])
             for opening in openings:
-                rule = self.employee_shift_rule(employee, opening, simulated, data["leaves"], day_offs)
+                rule = self.employee_shift_rule(employee, opening, simulated, data["leaves"], day_offs, allow_fixed_double=True)
                 if not rule["allowed"]:
                     raise APIError(f"{opening['work_date']} {str(opening['start_time'])[:5]}: {rule['reason']}", 409)
                 simulated.append({
@@ -2913,11 +2933,11 @@ class RumiHandler(BaseHTTPRequestHandler):
             })
             self.notify_role(
                 "admin", "Có đơn đăng ký ca cả tuần",
-                f"{employee.get('name')} đã gửi lịch tuần {week_start.isoformat()} gồm {len(opening_ids)} ngày.",
+                f"{employee.get('name')} đã gửi lịch tuần {week_start.isoformat()} gồm {len(selected_dates)} ngày / {len(opening_ids)} ca.",
                 "schedule", "requests"
             )
             self.audit(user, "submit_weekly", "weekly_shift_request", (result or {}).get("request_id"), {
-                "week_start": week_start.isoformat(), "opening_ids": opening_ids
+                "week_start": week_start.isoformat(), "opening_ids": opening_ids, "selected_days": len(selected_dates), "selected_shifts": len(opening_ids)
             })
             return self.ok(result or {}, "Đã gửi đơn đăng ký cả tuần để admin duyệt")
 
