@@ -4,7 +4,7 @@ const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const today = () => new Date().toISOString().slice(0, 10);
 const monthNow = () => new Date().toISOString().slice(0, 7);
-const APP_VERSION = '6.5.0';
+const APP_VERSION = '6.5.1';
 const state = {
   user: null,
   page: 'dashboard',
@@ -151,7 +151,29 @@ function updateClock() {
 setInterval(updateClock, 1000);
 
 function authLayout(card) {
-  return `<section class="auth-visual premium-auth"><div class="auth-brand"><div class="brand-mark">${icons.tea}</div><div><strong>RUMI</strong><span>MILK TEA MANAGER</span></div></div><div class="auth-copy"><span class="eyebrow">PREMIUM OPERATIONS</span><h1>Quản lý ca làm,<br>lương và kho thật gọn.</h1><p>Thiết kế cho chủ quán trà sữa cần nhìn nhanh tình hình nhân sự, duyệt lịch, kiểm soát chấm công và theo dõi nguyên liệu mỗi ngày.</p><div class="feature-row"><span class="feature-pill">Lịch tuần</span><span class="feature-pill">Chấm công GPS</span><span class="feature-pill">Lương tự động</span><span class="feature-pill">Kho cảnh báo</span></div></div><div class="auth-showcase"><div><span>Ca hôm nay</span><strong>12</strong></div><div><span>Đang làm</span><strong>5</strong></div><div><span>Tồn kho thấp</span><strong>3</strong></div></div></section><section class="auth-panel">${card}</section>`;
+  return `<section class="auth-visual premium-auth luxury-auth">
+    <div class="luxury-noise"></div>
+    <div class="luxury-orb orb-a"></div><div class="luxury-orb orb-b"></div><div class="luxury-orb orb-c"></div>
+    <div class="auth-brand luxury-brand"><div class="brand-mark">${icons.tea}</div><div><strong>RUMI</strong><span>MILK TEA MANAGER</span></div></div>
+    <div class="luxury-hero-copy">
+      <span class="eyebrow luxury-eyebrow">RUMI OPERATING SUITE</span>
+      <h1>Điều hành quán <span>như một thương hiệu lớn.</span></h1>
+      <p>Một màn hình cho lịch làm, chấm công GPS, lương tự động và kho nguyên liệu — thiết kế để khách nhìn vào là thấy đáng tiền.</p>
+      <div class="luxury-proof-row"><span>Quản trị ca</span><span>GPS & lương</span><span>Kho cảnh báo</span><span>Báo cáo chủ quán</span></div>
+    </div>
+    <div class="luxury-stage" aria-hidden="true">
+      <div class="luxury-dashboard-card">
+        <div class="luxury-window-bar"><i></i><i></i><i></i><strong>RUMI CONTROL</strong></div>
+        <div class="luxury-kpi-row"><div><span>CA HÔM NAY</span><b>12</b></div><div><span>ĐANG LÀM</span><b>5</b></div><div><span>KHO THẤP</span><b>3</b></div></div>
+        <div class="luxury-chart"><i style="height:45%"></i><i style="height:74%"></i><i style="height:58%"></i><i style="height:88%"></i><i style="height:64%"></i></div>
+        <div class="luxury-timeline"><p><b></b> Lê Vũ Phúc vừa chấm công</p><p><b></b> Lịch tuần đã được chốt</p><p><b></b> Trân châu còn dưới định mức</p></div>
+      </div>
+      <div class="luxury-phone-card"><span>PAYROLL</span><strong>18.450.000đ</strong><small>Lương dự kiến tháng này</small></div>
+      <div class="luxury-cup-3d"><div class="cup-lid"></div><div class="cup-body"><i></i><i></i><i></i><i></i><i></i></div><div class="cup-straw"></div></div>
+      <div class="luxury-floating-chip chip-gps"><i></i> GPS hợp lệ</div>
+      <div class="luxury-floating-chip chip-shift"><i></i> Ca được duyệt</div>
+    </div>
+  </section><section class="auth-panel luxury-panel">${card}<div class="luxury-panel-note"><span>Live demo</span><strong>Dashboard · Schedule · Payroll · Inventory</strong></div></section>`;
 }
 function showLogin() {
   state.user = null;
@@ -160,7 +182,7 @@ function showLogin() {
   history.replaceState(null, '', '/#login');
   $('#app-root').classList.add('hidden');
   $('#auth-root').classList.remove('hidden');
-  $('#auth-root').innerHTML = authLayout(`<form class="auth-card" data-form="login"><div class="auth-logo-mobile"><div class="brand-mark">${icons.tea}</div><strong>RUMI</strong></div><span class="eyebrow">ĐĂNG NHẬP HỆ THỐNG</span><h2>Chào mừng trở lại</h2><p>Đăng nhập để mở bảng điều hành dành riêng cho quản trị viên hoặc nhân viên.</p><div class="field"><label>Tên đăng nhập</label><input name="username" autocomplete="username" required placeholder="Ví dụ: an.nguyen"></div><div class="field" style="margin-top:13px"><label>Mật khẩu</label><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••"></div><button class="btn" type="submit">${icons.key} Đăng nhập</button></form>`);
+  $('#auth-root').innerHTML = authLayout(`<form class="auth-card luxury-login-card" data-form="login"><div class="auth-logo-mobile"><div class="brand-mark">${icons.tea}</div><strong>RUMI</strong></div><div class="login-topline"><span class="eyebrow">SECURE ACCESS</span><span class="login-status-dot">Online</span></div><h2>Vào trung tâm điều hành</h2><p>Đăng nhập để quản lý nhân sự, lịch tuần, bảng công, lương và tồn kho của quán.</p><div class="login-mini-metrics"><span><b>12</b> ca hôm nay</span><span><b>5</b> đang làm</span><span><b>3</b> kho thấp</span></div><div class="field"><label>Tên đăng nhập</label><input name="username" autocomplete="username" required placeholder="Ví dụ: admin"></div><div class="field" style="margin-top:13px"><label>Mật khẩu</label><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••"></div><button class="btn luxury-login-btn" type="submit">${icons.key} Đăng nhập hệ thống</button><div class="login-trust-row"><span>GPS</span><span>Payroll</span><span>Inventory</span></div></form>`);
 }
 function buildNav() {
   const items = state.user.role === 'admin' ? navAdmin : navEmployee;
