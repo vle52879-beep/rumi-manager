@@ -4,7 +4,7 @@ const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const today = () => new Date().toISOString().slice(0, 10);
 const monthNow = () => new Date().toISOString().slice(0, 7);
-const APP_VERSION = '6.5.1';
+const APP_VERSION = '6.5.3';
 const state = {
   user: null,
   page: 'dashboard',
@@ -151,30 +151,29 @@ function updateClock() {
 setInterval(updateClock, 1000);
 
 function authLayout(card) {
-  return `<section class="auth-visual premium-auth luxury-auth calm-auth">
-    <div class="calm-bg-grid"></div>
-    <div class="calm-orb calm-orb-a"></div>
-    <div class="calm-orb calm-orb-b"></div>
-    <div class="auth-brand calm-brand"><div class="brand-mark">${icons.tea}</div><div><strong>RUMI</strong><span>MILK TEA MANAGER</span></div></div>
-    <div class="calm-layout">
-      <div class="calm-copy">
-        <span class="eyebrow calm-eyebrow">RUMI OPERATING SYSTEM</span>
-        <h1>Quản lý ca, công và lương trong một màn hình.</h1>
-        <p>Dành cho chủ quán trà sữa, cafe và cửa hàng F&B: duyệt lịch tuần, chấm công GPS, tính lương và theo dõi kho rõ ràng.</p>
-        <div class="calm-points"><span>Chốt lịch tuần</span><span>GPS minh bạch</span><span>Lương tự động</span></div>
+  return `<section class="auth-visual studio-auth">
+    <div class="studio-grid"></div>
+    <div class="studio-glow studio-glow-a"></div>
+    <div class="studio-glow studio-glow-b"></div>
+    <div class="auth-brand studio-brand"><div class="brand-mark">${icons.tea}</div><div><strong>RUMI</strong><span>Milk Tea Manager</span></div></div>
+    <div class="studio-content">
+      <div class="studio-copy">
+        <span class="studio-kicker">F&B OPERATIONS PLATFORM</span>
+        <h1>Quản lý quán trà sữa gọn hơn mỗi ngày.</h1>
+        <p>Một hệ thống đẹp, rõ và dễ bán cho chủ quán: xếp ca, chấm công GPS, tính lương và kiểm soát kho trong cùng một nơi.</p>
+        <div class="studio-actions"><span>Ca làm</span><span>GPS</span><span>Lương</span><span>Kho</span></div>
       </div>
-      <div class="calm-showcase" aria-hidden="true">
-        <div class="calm-dashboard-card">
-          <div class="calm-card-head"><span>RUMI CONTROL</span><b>Hôm nay</b></div>
-          <div class="calm-kpis"><div><b>12</b><span>ca</span></div><div><b>5</b><span>đang làm</span></div><div><b>3</b><span>kho thấp</span></div></div>
-          <div class="calm-chart"><i style="height:45%"></i><i style="height:68%"></i><i style="height:56%"></i><i style="height:84%"></i><i style="height:62%"></i><i style="height:74%"></i></div>
-          <div class="calm-list"><p><em></em> Lịch tuần đã được duyệt</p><p><em></em> Chấm công GPS hợp lệ</p><p><em></em> Cảnh báo nguyên liệu thấp</p></div>
+      <div class="studio-product" aria-hidden="true">
+        <div class="studio-window">
+          <div class="studio-window-head"><span></span><span></span><span></span><b>RUMI Dashboard</b></div>
+          <div class="studio-stats"><div><b>12</b><span>Ca hôm nay</span></div><div><b>5</b><span>Đang làm</span></div><div><b>3</b><span>Kho thấp</span></div></div>
+          <div class="studio-chart"><i style="height:42%"></i><i style="height:68%"></i><i style="height:54%"></i><i style="height:88%"></i><i style="height:63%"></i></div>
+          <div class="studio-row"><em></em><strong>Lịch tuần đã duyệt</strong><span>ổn định</span></div>
+          <div class="studio-row"><em></em><strong>Chấm công GPS hợp lệ</strong><span>98%</span></div>
         </div>
-        <div class="calm-float calm-float-a"><strong>98%</strong><span>công hợp lệ</span></div>
-        <div class="calm-float calm-float-b"><strong>0đ</strong><span>sai lệch lương</span></div>
       </div>
     </div>
-  </section><section class="auth-panel calm-panel">${card}<div class="calm-panel-note"><span>Live demo</span><strong>Schedule · Attendance · Payroll · Inventory</strong></div></section>`;
+  </section><section class="auth-panel studio-panel">${card}</section>`;
 }
 function showLogin() {
   state.user = null;
@@ -183,7 +182,7 @@ function showLogin() {
   history.replaceState(null, '', '/#login');
   $('#app-root').classList.add('hidden');
   $('#auth-root').classList.remove('hidden');
-  $('#auth-root').innerHTML = authLayout(`<form class="auth-card calm-login-card" data-form="login"><div class="auth-logo-mobile"><div class="brand-mark">${icons.tea}</div><strong>RUMI</strong></div><div class="calm-login-head"><span class="eyebrow">RUMI ACCESS</span><span class="login-status-dot">Online</span></div><h2>Đăng nhập hệ thống</h2><p>Vào bảng điều hành để quản lý nhân sự, lịch tuần, bảng công, lương và kho hàng.</p><div class="calm-login-metrics"><span><b>12</b> ca hôm nay</span><span><b>5</b> đang làm</span><span><b>3</b> kho thấp</span></div><div class="field"><label>Tên đăng nhập</label><input name="username" autocomplete="username" required placeholder="Ví dụ: admin"></div><div class="field" style="margin-top:13px"><label>Mật khẩu</label><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••"></div><button class="btn calm-login-btn" type="submit">${icons.key} Đăng nhập</button></form>`);
+  $('#auth-root').innerHTML = authLayout(`<form class="auth-card studio-login-card" data-form="login"><div class="studio-login-head"><div><span class="studio-kicker dark">RUMI ACCESS</span><h2>Đăng nhập</h2></div><span class="studio-online">Online</span></div><p class="studio-login-desc">Mở bảng điều hành quản lý ca, công, lương và kho hàng.</p><div class="field"><label>Tên đăng nhập</label><input name="username" autocomplete="username" required placeholder="admin"></div><div class="field" style="margin-top:14px"><label>Mật khẩu</label><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••"></div><button class="btn studio-login-btn" type="submit">${icons.key} Đăng nhập hệ thống</button><div class="studio-login-foot"><span>Schedule</span><span>Attendance</span><span>Payroll</span><span>Inventory</span></div></form>`);
 }
 function buildNav() {
   const items = state.user.role === 'admin' ? navAdmin : navEmployee;

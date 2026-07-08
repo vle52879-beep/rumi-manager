@@ -1,3 +1,7 @@
+# RUMI Manager — v6.5.3 Studio Executive Login
+
+Bản v6.5.3 làm lại màn hình đăng nhập gọn hơn, bỏ bố cục chữ khổng lồ và card rối, giữ phong cách SaaS chuyên nghiệp.
+
 # RUMI Manager 6.5.0 — Premium Sales Edition
 
 Bản nâng cấp giao diện để RUMI nhìn chuyên nghiệp hơn khi demo cho khách hàng.
