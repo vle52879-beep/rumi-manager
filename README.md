@@ -1,4 +1,4 @@
-# RUMI Manager 6.4.2 — Admin Control
+# RUMI Manager 6.4.5 — Attendance Risk Hotfix
 
 Bản nâng cấp từ 6.4.1, tập trung vào quản trị thông báo, lịch sử kho, giới hạn giờ tuần và đổi nhân viên cho ca đã xếp.
 
@@ -34,7 +34,7 @@ Bản nâng cấp từ 6.4.1, tập trung vào quản trị thông báo, lịch 
 
 1. Chạy `sql/SUPABASE_RUMI_V6_4_2_ADMIN_CONTROL.sql` trong Supabase SQL Editor.
 2. Đẩy mã nguồn lên Vercel.
-3. Mở `/api/health` và kiểm tra phiên bản `6.4.3`.
+3. Mở `/api/health` và kiểm tra phiên bản `6.4.5`.
 
 Đọc thêm `UPGRADE_V642.md` và `DEPLOY_VERCEL.md`.
 
@@ -45,3 +45,10 @@ Admin chính có thể tạo thêm tài khoản quản trị trong trang **Tài 
 
 ## Cập nhật mới
 - v6.4.4: sửa duyệt lượt công rủi ro cho ca chưa có bản ghi chấm công và giảm lỗi 401 unread-count.
+
+
+## v6.4.5 — Sửa lỗi duyệt lượt công rủi ro
+
+- Sửa lỗi `null value in column "check_in"` khi admin xử lý ca chưa có chấm công.
+- Bản ghi xử lý rủi ro được lưu 0 giờ, không cộng lương, không hiện lại trong danh sách chờ.
+- Không cần chạy thêm SQL.

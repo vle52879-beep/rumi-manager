@@ -751,7 +751,7 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/6.4.3"
+    server_version = "RUMI/6.4.5"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -2234,7 +2234,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 shift_reassignments=lambda: SB.select(TABLES["shift_reassignments"], limit=1, columns="id"),
                 withdrawal_archive=lambda: SB.select(TABLES["withdrawals"], limit=1, columns="id,deleted_at"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.4", "multi_admin_accounts": True, "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.5", "multi_admin_accounts": True, "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
@@ -3830,16 +3830,20 @@ class RumiHandler(BaseHTTPRequestHandler):
                     raise APIError("Không tìm thấy ca làm", 404)
                 shift = shifts[0]
                 synthetic_status = "Đã kiểm tra - không có chấm công" if status == "Đã duyệt" else "Từ chối chấm công"
+                # Một số database cũ đang đặt NOT NULL cho rumi_attendance.check_in.
+                # Với ca chưa hề chấm công, tạo bản ghi 0 giờ bằng mốc bắt đầu ca để thỏa schema,
+                # còn phần giao diện sẽ dựa vào status/calculation_note để hiển thị là "chưa chấm".
+                synthetic_check_in = normalize_time(shift.get("start_time")) or "00:00"
                 rows = [SB.upsert(TABLES["attendance"], {
                     "shift_id": shift["id"], "employee_id": shift["employee_id"], "work_date": shift["shift_date"],
-                    "check_in": None, "check_out": None, "hours": 0,
+                    "check_in": synthetic_check_in, "check_out": synthetic_check_in, "hours": 0,
                     "scheduled_hours": shift_hours(str(shift.get("start_time")), str(shift.get("end_time"))),
                     "worked_minutes": 0, "base_payable_minutes": 0, "payable_minutes": 0, "payable_hours": 0,
                     "late_minutes": 0, "early_leave_minutes": 0, "overtime_minutes": 0,
                     "overtime_requested_minutes": 0, "overtime_approved_minutes": 0, "overtime_status": "Không có",
                     "status": synthetic_status, "risk_level": "Cao", "review_status": status,
                     "reviewed_by": user["id"], "reviewed_at": now_iso(),
-                    "calculation_note": "Admin đã xử lý lượt ca không có chấm công hợp lệ.",
+                    "calculation_note": "Admin đã xử lý lượt ca không có chấm công hợp lệ. Bản ghi 0 giờ dùng mốc hệ thống để tương thích cấu trúc dữ liệu cũ.",
                     "note": note or ("Admin xác nhận đã kiểm tra" if status == "Đã duyệt" else "Admin loại công vì không có chấm công hợp lệ"),
                 }, "shift_id")]
                 try:

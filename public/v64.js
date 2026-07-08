@@ -1,8 +1,8 @@
 'use strict';
 
-/* RUMI 6.4.2 — đăng ký tuần sau, cho phép chọn 1 hoặc 2 ca mỗi ngày. */
+/* RUMI 6.4.5 — đăng ký tuần sau, cho phép chọn 1 hoặc 2 ca mỗi ngày. */
 (() => {
-  const VERSION = '6.4.2';
+  const VERSION = '6.4.5';
   const SHIFT_SPECS = [
     { code: 'CA_09_17', label: 'Ca ngày', start: '09:00', end: '17:00', hours: 8, tone: 'day' },
     { code: 'CA_17_23', label: 'Ca tối', start: '17:00', end: '23:00', hours: 6, tone: 'night' },

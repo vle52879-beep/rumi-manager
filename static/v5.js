@@ -4,7 +4,7 @@
    keeps all business rules on the Python/PostgreSQL backend. */
 
 window.RumiV5 = (() => {
-  const VERSION = '6.4.2';
+  const VERSION = '6.4.5';
   const pageNode = () => document.querySelector('#page');
   const localISO = (date) => {
     const d = new Date(date);
@@ -38,6 +38,8 @@ window.RumiV5 = (() => {
   const byDateTime = (a, b) => `${a.shift_date || a.work_date} ${a.start_time || a.check_in || ''}`.localeCompare(`${b.shift_date || b.work_date} ${b.start_time || b.check_in || ''}`);
   const total = (rows, key) => rows.reduce((sum, row) => sum + Number(row[key] || 0), 0);
   const unique = (rows, key) => new Set(rows.map((row) => row[key]).filter(Boolean)).size;
+  const noValidClock = (x) => normalize(`${x?.status || ''} ${x?.calculation_note || ''} ${x?.note || ''}`).includes('khong co cham cong') || normalize(x?.status || '').includes('tu choi cham cong');
+  const clockRange = (x) => noValidClock(x) ? '— – —' : `${clockRange(x)}`;
   const compactMoney = (value) => {
     const n = Number(value || 0);
     if (n >= 1_000_000_000) return `${number(n / 1_000_000_000, 1)} tỷ`;
@@ -391,7 +393,7 @@ window.RumiV5 = (() => {
       </section>
       ${filterToolbar(`<div class="search-box">${icons.search}<input id="v5-attendance-search" placeholder="Tìm nhân viên hoặc ngày..."></div><input type="month" id="attendance-month" value="${state.month}"><select id="v5-attendance-status"><option value="">Tất cả trạng thái</option>${[...new Set(rows.map((x) => x.status).filter(Boolean))].map((x) => `<option>${esc(x)}</option>`).join('')}</select><span id="v5-attendance-count" class="v5-filter-count">${rows.length} dòng</span>`)}
       <div class="table-wrap"><table><thead><tr><th>Nhân viên</th><th>Ngày / ca</th><th>Vào – ra</th><th>Giờ dự kiến</th><th>Giờ tính lương</th><th>Trễ / sớm / tăng ca</th><th>GPS</th><th>Trạng thái</th><th></th></tr></thead><tbody id="v5-attendance-rows">
-        ${rows.map((x) => `<tr data-search="${esc(normalize(`${x.employee_name} ${x.employee_code} ${x.work_date}`))}" data-status="${esc(x.status)}"><td>${person(x.employee_name, x.employee_code)}</td><td><span class="cell-main">${dateVN(x.work_date)}</span><span class="cell-sub">${x.shift ? `${x.shift.start_time}–${x.shift.end_time}` : 'Ngoài lịch'}</span></td><td><span class="cell-main">${esc(x.check_in || '—')} – ${esc(x.check_out || '—')}</span><span class="cell-sub">${number(x.actual_hours || x.hours,2)} giờ thực tế</span></td><td>${number(x.scheduled_hours || 0,2)} giờ</td><td class="money"><strong>${number(x.payable_hours || x.hours,2)} giờ</strong></td><td><span class="v53-metric late">Trễ ${x.late_minutes || 0}p</span><span class="v53-metric early">Sớm ${x.early_leave_minutes || 0}p</span><span class="v53-metric overtime">TC ${x.overtime_minutes || 0}p</span></td><td><span class="cell-main">${x.check_in_distance_m != null ? `${number(x.check_in_distance_m,1)} m` : (x.is_synthetic ? 'Chưa chấm' : 'Thủ công')}</span><span class="cell-sub">${x.check_in_accuracy_m ? `Sai số ${number(x.check_in_accuracy_m,0)} m` : ''}</span></td><td>${badge(x.status)}</td><td><button class="btn small secondary" data-action="attendance-edit" data-id="${x.shift_id || ''}" ${!x.shift_id ? 'disabled' : ''}>${icons.edit}</button></td></tr>`).join('') || `<tr><td colspan="9">${empty('Chưa có dữ liệu công', 'Dữ liệu xuất hiện sau khi nhân viên chấm công.', 'clock')}</td></tr>`}
+        ${rows.map((x) => `<tr data-search="${esc(normalize(`${x.employee_name} ${x.employee_code} ${x.work_date}`))}" data-status="${esc(x.status)}"><td>${person(x.employee_name, x.employee_code)}</td><td><span class="cell-main">${dateVN(x.work_date)}</span><span class="cell-sub">${x.shift ? `${x.shift.start_time}–${x.shift.end_time}` : 'Ngoài lịch'}</span></td><td><span class="cell-main">${clockRange(x)}</span><span class="cell-sub">${number(x.actual_hours || x.hours,2)} giờ thực tế</span></td><td>${number(x.scheduled_hours || 0,2)} giờ</td><td class="money"><strong>${number(x.payable_hours || x.hours,2)} giờ</strong></td><td><span class="v53-metric late">Trễ ${x.late_minutes || 0}p</span><span class="v53-metric early">Sớm ${x.early_leave_minutes || 0}p</span><span class="v53-metric overtime">TC ${x.overtime_minutes || 0}p</span></td><td><span class="cell-main">${x.check_in_distance_m != null ? `${number(x.check_in_distance_m,1)} m` : (x.is_synthetic ? 'Chưa chấm' : 'Thủ công')}</span><span class="cell-sub">${x.check_in_accuracy_m ? `Sai số ${number(x.check_in_accuracy_m,0)} m` : ''}</span></td><td>${badge(x.status)}</td><td><button class="btn small secondary" data-action="attendance-edit" data-id="${x.shift_id || ''}" ${!x.shift_id ? 'disabled' : ''}>${icons.edit}</button></td></tr>`).join('') || `<tr><td colspan="9">${empty('Chưa có dữ liệu công', 'Dữ liệu xuất hiện sau khi nhân viên chấm công.', 'clock')}</td></tr>`}
       </tbody></table></div>`;
   };
 
@@ -688,7 +690,7 @@ window.RumiV5 = (() => {
     }
     if (kind === 'attendance') {
       const rows = state.cache.attendance || [];
-      return downloadCSV(`rumi-bang-cong-${state.month}.csv`, ['Nhân viên','Ngày','Giờ vào','Giờ ra','Số giờ','Khoảng cách GPS','Sai số GPS','Trạng thái'], rows.map((x) => [x.employee_name || state.user.name,x.work_date,x.check_in,x.check_out,x.hours,x.check_in_distance_m,x.check_in_accuracy_m,x.status]));
+      return downloadCSV(`rumi-bang-cong-${state.month}.csv`, ['Nhân viên','Ngày','Giờ vào','Giờ ra','Số giờ','Khoảng cách GPS','Sai số GPS','Trạng thái'], rows.map((x) => [x.employee_name || state.user.name,x.work_date,noValidClock(x)?'':x.check_in,noValidClock(x)?'':x.check_out,x.hours,x.check_in_distance_m,x.check_in_accuracy_m,x.status]));
     }
     if (kind === 'payroll') {
       const rows = state.cache.payroll || [];
