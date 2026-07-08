@@ -4,7 +4,7 @@
    keeps all business rules on the Python/PostgreSQL backend. */
 
 window.RumiV5 = (() => {
-  const VERSION = '6.4.5';
+  const VERSION = '6.4.6';
   const pageNode = () => document.querySelector('#page');
   const localISO = (date) => {
     const d = new Date(date);
@@ -39,7 +39,13 @@ window.RumiV5 = (() => {
   const total = (rows, key) => rows.reduce((sum, row) => sum + Number(row[key] || 0), 0);
   const unique = (rows, key) => new Set(rows.map((row) => row[key]).filter(Boolean)).size;
   const noValidClock = (x) => normalize(`${x?.status || ''} ${x?.calculation_note || ''} ${x?.note || ''}`).includes('khong co cham cong') || normalize(x?.status || '').includes('tu choi cham cong');
-  const clockRange = (x) => noValidClock(x) ? '— – —' : `${clockRange(x)}`;
+  const formatClockValue = (value, fallback = '—') => {
+    if (!value) return fallback;
+    const text = String(value);
+    const match = text.match(/\d{2}:\d{2}/);
+    return match ? match[0] : text.slice(0, 5);
+  };
+  const clockRange = (x) => noValidClock(x) ? '— – —' : `${formatClockValue(x.check_in || x.check_in_at)} – ${formatClockValue(x.check_out || x.check_out_at, 'Chưa ra')}`;
   const compactMoney = (value) => {
     const n = Number(value || 0);
     if (n >= 1_000_000_000) return `${number(n / 1_000_000_000, 1)} tỷ`;

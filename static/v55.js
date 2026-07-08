@@ -2,7 +2,7 @@
 
 /* RUMI 5.5 — account security and smart attendance. */
 (() => {
-  const VERSION = '6.4.5';
+  const VERSION = '6.4.6';
 
   icons.shield = '<svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.2c0 4.7 3.2 8.9 7.5 10.1 4.3-1.2 7.5-5.4 7.5-10.1V6L12 3Z"/><path d="m8.7 12.1 2.1 2.1 4.6-4.8"/></svg>';
   icons.device = '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 17h6"/></svg>';
