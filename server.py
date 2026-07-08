@@ -2234,10 +2234,17 @@ class RumiHandler(BaseHTTPRequestHandler):
                 shift_reassignments=lambda: SB.select(TABLES["shift_reassignments"], limit=1, columns="id"),
                 withdrawal_archive=lambda: SB.select(TABLES["withdrawals"], limit=1, columns="id,deleted_at"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.3", "multi_admin_accounts": True, "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.4", "multi_admin_accounts": True, "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})
+
+        if path == "/api/notifications/unread-count":
+            user = self.current_user(required=False)
+            if not user:
+                return self.ok({"count": 0})
+            self.require_password_changed(user, path)
+            return self.ok({"count": len(self.get_notifications(user, limit=None, unread_only=True))})
 
         user = self.current_user()
         self.require_password_changed(user, path)
@@ -2302,8 +2309,6 @@ class RumiHandler(BaseHTTPRequestHandler):
         if path == "/api/notifications":
             return self.ok(self.get_notifications(user, limit=None))
 
-        if path == "/api/notifications/unread-count":
-            return self.ok({"count": len(self.get_notifications(user, limit=None, unread_only=True))})
 
         if path == "/api/attendance/alerts":
             return self.ok(self.sync_attendance_alerts(user))
@@ -2340,7 +2345,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 employees = SB.select_in(TABLES["employees"], "id", [x.get("employee_id") for x in corrections], columns="id,code,name,role")
                 correction_rows = add_people(corrections, employees)
                 pending_overtime = [x for x in history if x.get("overtime_status") == "Chờ duyệt"]
-                pending_risk = [x for x in history if x.get("review_status") == "Chờ duyệt" or x.get("risk_level") == "Cao"]
+                pending_risk = [x for x in history if x.get("review_status") == "Chờ duyệt" or (not x.get("review_status") and x.get("risk_level") == "Cao")]
                 settings_rows = SB.select(TABLES["settings"], filters={"id": "eq.1"}, limit=1)
                 return self.ok({"history": history, "alerts": self.sync_attendance_alerts(user), "corrections": correction_rows, "pending_overtime": pending_overtime, "pending_risk": pending_risk, "settings": settings_rows[0] if settings_rows else {}})
             start, end = month_bounds(month)
@@ -3804,6 +3809,7 @@ class RumiHandler(BaseHTTPRequestHandler):
         if path == "/api/attendance/risk/review":
             self.require_role(user, "admin")
             attendance_id = integer(body.get("attendance_id"))
+            shift_id = integer(body.get("shift_id"))
             status = str(body.get("status", "")).strip()
             note = str(body.get("note", "")).strip()
             if status not in {"Đã duyệt", "Từ chối"}:
@@ -3816,11 +3822,41 @@ class RumiHandler(BaseHTTPRequestHandler):
             }
             if status == "Từ chối":
                 updates.update({"payable_minutes": 0, "payable_hours": 0, "hours": 0, "status": "Từ chối chấm công"})
-            rows = SB.update(TABLES["attendance"], updates, {"id": f"eq.{attendance_id}"})
+            filters = {"id": f"eq.{attendance_id}"} if attendance_id else ({"shift_id": f"eq.{shift_id}"} if shift_id else {})
+            rows = SB.update(TABLES["attendance"], updates, filters) if filters else []
+            if not rows and shift_id:
+                shifts = SB.select(TABLES["shifts"], filters={"id": f"eq.{shift_id}"}, limit=1, columns="id,employee_id,location_id,shift_date,start_time,end_time,status,note")
+                if not shifts:
+                    raise APIError("Không tìm thấy ca làm", 404)
+                shift = shifts[0]
+                synthetic_status = "Đã kiểm tra - không có chấm công" if status == "Đã duyệt" else "Từ chối chấm công"
+                rows = [SB.upsert(TABLES["attendance"], {
+                    "shift_id": shift["id"], "employee_id": shift["employee_id"], "work_date": shift["shift_date"],
+                    "check_in": None, "check_out": None, "hours": 0,
+                    "scheduled_hours": shift_hours(str(shift.get("start_time")), str(shift.get("end_time"))),
+                    "worked_minutes": 0, "base_payable_minutes": 0, "payable_minutes": 0, "payable_hours": 0,
+                    "late_minutes": 0, "early_leave_minutes": 0, "overtime_minutes": 0,
+                    "overtime_requested_minutes": 0, "overtime_approved_minutes": 0, "overtime_status": "Không có",
+                    "status": synthetic_status, "risk_level": "Cao", "review_status": status,
+                    "reviewed_by": user["id"], "reviewed_at": now_iso(),
+                    "calculation_note": "Admin đã xử lý lượt ca không có chấm công hợp lệ.",
+                    "note": note or ("Admin xác nhận đã kiểm tra" if status == "Đã duyệt" else "Admin loại công vì không có chấm công hợp lệ"),
+                }, "shift_id")]
+                try:
+                    SB.update(TABLES["attendance_alerts"], {
+                        "status": "Đã xử lý" if status == "Đã duyệt" else "Vắng ca",
+                        "resolved_at": now_iso(),
+                        "resolution_note": note or synthetic_status,
+                        "last_detected_at": now_iso(),
+                    }, {"shift_id": f"eq.{shift_id}"})
+                    ATTENDANCE_ALERT_CACHE.clear()
+                except Exception as exc:
+                    print("Attendance alert resolve warning:", repr(exc))
             if not rows:
                 raise APIError("Không tìm thấy lượt chấm công", 404)
             self.notify_employee(integer(rows[0].get("employee_id")), "Lượt chấm công đã được kiểm tra", f"Kết quả: {status}. {note}".strip(), "attendance", "attendance")
-            self.audit(user, "review_risk", "attendance", attendance_id, {"status": status})
+            self.audit(user, "review_risk", "attendance", rows[0].get("id") or attendance_id or shift_id, {"status": status, "shift_id": shift_id})
+            ATTENDANCE_ALERT_CACHE.clear()
             return self.ok(rows[0], "Đã xử lý lượt chấm công rủi ro")
 
         if path == "/api/attendance/alerts/remind":

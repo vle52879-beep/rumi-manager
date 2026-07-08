@@ -283,7 +283,10 @@
   function enhanceAdminAttendance(data) {
     const pendingOt = (data.pending_overtime || []).filter((x) => Number(x.overtime_requested_minutes || x.overtime_minutes || 0) > 0 && x.overtime_status === 'Chờ duyệt');
     const corrections = (data.corrections || []).filter((x) => x.status === 'Chờ duyệt');
-    const pendingRisk = (data.pending_risk || []).filter((x) => x.review_status === 'Chờ duyệt' || x.risk_level === 'Cao');
+    const pendingRisk = (data.pending_risk || []).filter((x) => {
+      const review = String(x.review_status || '').trim();
+      return review === 'Chờ duyệt' || (!review && x.risk_level === 'Cao');
+    });
     const page = $('#page');
     const introNode = page.querySelector('.page-intro');
     const panel = document.createElement('section');
@@ -291,7 +294,7 @@
     panel.innerHTML = `
       <article class="card"><div class="card-head"><div><h3>Tăng ca chờ duyệt</h3><p>Chỉ phút được duyệt mới cộng vào lương.</p></div><span class="badge amber">${pendingOt.length} yêu cầu</span></div><div class="card-body">${pendingOt.length ? `<div class="list">${pendingOt.map((x) => `<div class="list-row"><span class="list-icon">${icons.clock}</span><div class="list-copy"><strong>${esc(x.employee_name)} · ${dateVN(x.work_date)}</strong><span>Đề nghị ${x.overtime_requested_minutes || x.overtime_minutes} phút · giờ nền ${number((x.base_payable_minutes || 0)/60,2)}</span></div><button class="btn small" data-v55-action="overtime-review" data-id="${x.id}" data-minutes="${x.overtime_requested_minutes || x.overtime_minutes}">Duyệt</button><button class="btn small danger" data-v55-action="overtime-reject" data-id="${x.id}">Từ chối</button></div>`).join('')}</div>` : empty('Không có tăng ca chờ duyệt', 'Tăng ca phát sinh sẽ xuất hiện tại đây.', 'clock')}</div></article>
       <article class="card"><div class="card-head"><div><h3>Yêu cầu sửa chấm công</h3><p>Đối chiếu ca trước khi phê duyệt.</p></div><span class="badge amber">${corrections.length} yêu cầu</span></div><div class="card-body">${corrections.length ? `<div class="list">${corrections.map((x) => `<div class="list-row"><span class="list-icon">${icons.edit}</span><div class="list-copy"><strong>${esc(x.employee_name || 'Nhân viên')}</strong><span>${esc(x.reason)} · đề nghị ${esc(x.requested_check_in || '—')}–${esc(x.requested_check_out || '—')}</span></div><button class="btn small" data-v55-action="correction-review" data-status="Đã duyệt" data-id="${x.id}">Duyệt</button><button class="btn small danger" data-v55-action="correction-review" data-status="Từ chối" data-id="${x.id}">Từ chối</button></div>`).join('')}</div>` : empty('Không có yêu cầu sửa công', 'Đơn nhân viên gửi sẽ xuất hiện tại đây.', 'edit')}</div></article>
-      <article class="card"><div class="card-head"><div><h3>Lượt công rủi ro</h3><p>Thiết bị dùng chung hoặc GPS gần ngưỡng cần kiểm tra.</p></div><span class="badge red">${pendingRisk.length} lượt</span></div><div class="card-body">${pendingRisk.length ? `<div class="list">${pendingRisk.map((x) => `<div class="list-row"><span class="list-icon">${icons.alert}</span><div class="list-copy"><strong>${esc(x.employee_name || 'Nhân viên')} · ${dateVN(x.work_date)}</strong><span>${esc(x.risk_level || '')} · ${esc(Array.isArray(x.risk_reasons) ? x.risk_reasons.join(', ') : x.risk_reasons || 'Cần xác minh')}</span></div><button class="btn small" data-v55-action="risk-review" data-status="Đã duyệt" data-id="${x.id}">Xác nhận</button><button class="btn small danger" data-v55-action="risk-review" data-status="Từ chối" data-id="${x.id}">Loại công</button></div>`).join('')}</div>` : empty('Không có lượt công rủi ro', 'Các lượt nghi ngờ sẽ xuất hiện tại đây.', 'shield')}</div></article>`;
+      <article class="card"><div class="card-head"><div><h3>Lượt công rủi ro</h3><p>Thiết bị dùng chung hoặc GPS gần ngưỡng cần kiểm tra.</p></div><span class="badge red">${pendingRisk.length} lượt</span></div><div class="card-body">${pendingRisk.length ? `<div class="list">${pendingRisk.map((x) => `<div class="list-row"><span class="list-icon">${icons.alert}</span><div class="list-copy"><strong>${esc(x.employee_name || 'Nhân viên')} · ${dateVN(x.work_date)}</strong><span>${esc(x.risk_level || '')} · ${esc(Array.isArray(x.risk_reasons) ? x.risk_reasons.join(', ') : x.risk_reasons || x.calculation_note || 'Cần xác minh')}</span></div><button class="btn small" data-v55-action="risk-review" data-status="Đã duyệt" data-id="${x.id || ''}" data-shift-id="${x.shift_id || ''}">Xác nhận</button><button class="btn small danger" data-v55-action="risk-review" data-status="Từ chối" data-id="${x.id || ''}" data-shift-id="${x.shift_id || ''}">Loại công</button></div>`).join('')}</div>` : empty('Không có lượt công rủi ro', 'Các lượt nghi ngờ sẽ xuất hiện tại đây.', 'shield')}</div></article>`;
     if (introNode) introNode.insertAdjacentElement('afterend', panel); else page.prepend(panel);
 
     page.querySelectorAll('#v5-attendance-rows tr').forEach((row, index) => {
@@ -392,7 +395,7 @@
       }
       if (action === 'risk-review') {
         const note = prompt(button.dataset.status === 'Đã duyệt' ? 'Ghi chú xác minh (không bắt buộc):' : 'Lý do loại lượt công:') || '';
-        await api('/api/attendance/risk/review',{method:'POST',body:{attendance_id:Number(button.dataset.id),status:button.dataset.status,note}}); toast('Đã xử lý lượt chấm công rủi ro'); return navigate('attendance');
+        await api('/api/attendance/risk/review',{method:'POST',body:{attendance_id:Number(button.dataset.id || 0),shift_id:Number(button.dataset.shiftId || 0),status:button.dataset.status,note}}); toast('Đã xử lý lượt chấm công rủi ro'); return navigate('attendance');
       }
       if (action === 'correction-review') {
         const note = prompt(button.dataset.status === 'Đã duyệt' ? 'Ghi chú duyệt (không bắt buộc):' : 'Lý do từ chối:') || '';

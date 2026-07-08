@@ -42,3 +42,6 @@ Bản nâng cấp từ 6.4.1, tập trung vào quản trị thông báo, lịch 
 ## v6.4.3 — Nhiều tài khoản admin
 
 Admin chính có thể tạo thêm tài khoản quản trị trong trang **Tài khoản & bảo mật**. Tài khoản mới phải đổi mật khẩu ở lần đăng nhập đầu tiên. Không cần migration SQL.
+
+## Cập nhật mới
+- v6.4.4: sửa duyệt lượt công rủi ro cho ca chưa có bản ghi chấm công và giảm lỗi 401 unread-count.

@@ -140,6 +140,9 @@ def main():
     assert 'path == "/api/admin/accounts"' in server_source
     assert '"admin_accounts": admin_accounts' in server_source
     assert 'data-form="v643-admin-create"' in security_source
+    assert 'shift_id = integer(body.get("shift_id"))' in server_source
+    assert 'data-shift-id' in security_source
+    assert 'current_user(required=False)' in server_source
 
     print("✓ PBKDF2-HMAC-SHA256 600.000 vòng và chính sách mật khẩu")
     print("✓ Chữ ký phiên đăng nhập")
@@ -154,6 +157,7 @@ def main():
     print("✓ Trần 56 giờ/tuần được áp dụng")
     print("✓ Migration xóa lịch sử mềm và đổi nhân viên theo đơn đăng ký")
     print("✓ Tạo thêm tài khoản admin riêng và bắt buộc đổi mật khẩu lần đầu")
+    print("✓ Duyệt lượt công rủi ro hỗ trợ cả ca chưa có bản ghi chấm công")
     print("Self-test hoàn tất.")
 
 
