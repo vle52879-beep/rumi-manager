@@ -19,7 +19,7 @@ Xem `UPGRADE_V650.md`.
 Không cần chạy thêm SQL.
 
 
-## RUMI v6.5.1 — Luxury 3D Login UI
+## RUMI v6.5.2 — Clean Executive Login UI
 
 - Làm lại màn hình đăng nhập/first impression theo phong cách 3D cao cấp.
 - Thêm dashboard mockup, ly trà sữa 3D, KPI nổi và animation bán hàng.

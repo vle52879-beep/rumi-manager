@@ -151,29 +151,30 @@ function updateClock() {
 setInterval(updateClock, 1000);
 
 function authLayout(card) {
-  return `<section class="auth-visual premium-auth luxury-auth">
-    <div class="luxury-noise"></div>
-    <div class="luxury-orb orb-a"></div><div class="luxury-orb orb-b"></div><div class="luxury-orb orb-c"></div>
-    <div class="auth-brand luxury-brand"><div class="brand-mark">${icons.tea}</div><div><strong>RUMI</strong><span>MILK TEA MANAGER</span></div></div>
-    <div class="luxury-hero-copy">
-      <span class="eyebrow luxury-eyebrow">RUMI OPERATING SUITE</span>
-      <h1>Điều hành quán <span>như một thương hiệu lớn.</span></h1>
-      <p>Một màn hình cho lịch làm, chấm công GPS, lương tự động và kho nguyên liệu — thiết kế để khách nhìn vào là thấy đáng tiền.</p>
-      <div class="luxury-proof-row"><span>Quản trị ca</span><span>GPS & lương</span><span>Kho cảnh báo</span><span>Báo cáo chủ quán</span></div>
-    </div>
-    <div class="luxury-stage" aria-hidden="true">
-      <div class="luxury-dashboard-card">
-        <div class="luxury-window-bar"><i></i><i></i><i></i><strong>RUMI CONTROL</strong></div>
-        <div class="luxury-kpi-row"><div><span>CA HÔM NAY</span><b>12</b></div><div><span>ĐANG LÀM</span><b>5</b></div><div><span>KHO THẤP</span><b>3</b></div></div>
-        <div class="luxury-chart"><i style="height:45%"></i><i style="height:74%"></i><i style="height:58%"></i><i style="height:88%"></i><i style="height:64%"></i></div>
-        <div class="luxury-timeline"><p><b></b> Lê Vũ Phúc vừa chấm công</p><p><b></b> Lịch tuần đã được chốt</p><p><b></b> Trân châu còn dưới định mức</p></div>
+  return `<section class="auth-visual premium-auth luxury-auth calm-auth">
+    <div class="calm-bg-grid"></div>
+    <div class="calm-orb calm-orb-a"></div>
+    <div class="calm-orb calm-orb-b"></div>
+    <div class="auth-brand calm-brand"><div class="brand-mark">${icons.tea}</div><div><strong>RUMI</strong><span>MILK TEA MANAGER</span></div></div>
+    <div class="calm-layout">
+      <div class="calm-copy">
+        <span class="eyebrow calm-eyebrow">RUMI OPERATING SYSTEM</span>
+        <h1>Quản lý ca, công và lương trong một màn hình.</h1>
+        <p>Dành cho chủ quán trà sữa, cafe và cửa hàng F&B: duyệt lịch tuần, chấm công GPS, tính lương và theo dõi kho rõ ràng.</p>
+        <div class="calm-points"><span>Chốt lịch tuần</span><span>GPS minh bạch</span><span>Lương tự động</span></div>
       </div>
-      <div class="luxury-phone-card"><span>PAYROLL</span><strong>18.450.000đ</strong><small>Lương dự kiến tháng này</small></div>
-      <div class="luxury-cup-3d"><div class="cup-lid"></div><div class="cup-body"><i></i><i></i><i></i><i></i><i></i></div><div class="cup-straw"></div></div>
-      <div class="luxury-floating-chip chip-gps"><i></i> GPS hợp lệ</div>
-      <div class="luxury-floating-chip chip-shift"><i></i> Ca được duyệt</div>
+      <div class="calm-showcase" aria-hidden="true">
+        <div class="calm-dashboard-card">
+          <div class="calm-card-head"><span>RUMI CONTROL</span><b>Hôm nay</b></div>
+          <div class="calm-kpis"><div><b>12</b><span>ca</span></div><div><b>5</b><span>đang làm</span></div><div><b>3</b><span>kho thấp</span></div></div>
+          <div class="calm-chart"><i style="height:45%"></i><i style="height:68%"></i><i style="height:56%"></i><i style="height:84%"></i><i style="height:62%"></i><i style="height:74%"></i></div>
+          <div class="calm-list"><p><em></em> Lịch tuần đã được duyệt</p><p><em></em> Chấm công GPS hợp lệ</p><p><em></em> Cảnh báo nguyên liệu thấp</p></div>
+        </div>
+        <div class="calm-float calm-float-a"><strong>98%</strong><span>công hợp lệ</span></div>
+        <div class="calm-float calm-float-b"><strong>0đ</strong><span>sai lệch lương</span></div>
+      </div>
     </div>
-  </section><section class="auth-panel luxury-panel">${card}<div class="luxury-panel-note"><span>Live demo</span><strong>Dashboard · Schedule · Payroll · Inventory</strong></div></section>`;
+  </section><section class="auth-panel calm-panel">${card}<div class="calm-panel-note"><span>Live demo</span><strong>Schedule · Attendance · Payroll · Inventory</strong></div></section>`;
 }
 function showLogin() {
   state.user = null;
@@ -182,7 +183,7 @@ function showLogin() {
   history.replaceState(null, '', '/#login');
   $('#app-root').classList.add('hidden');
   $('#auth-root').classList.remove('hidden');
-  $('#auth-root').innerHTML = authLayout(`<form class="auth-card luxury-login-card" data-form="login"><div class="auth-logo-mobile"><div class="brand-mark">${icons.tea}</div><strong>RUMI</strong></div><div class="login-topline"><span class="eyebrow">SECURE ACCESS</span><span class="login-status-dot">Online</span></div><h2>Vào trung tâm điều hành</h2><p>Đăng nhập để quản lý nhân sự, lịch tuần, bảng công, lương và tồn kho của quán.</p><div class="login-mini-metrics"><span><b>12</b> ca hôm nay</span><span><b>5</b> đang làm</span><span><b>3</b> kho thấp</span></div><div class="field"><label>Tên đăng nhập</label><input name="username" autocomplete="username" required placeholder="Ví dụ: admin"></div><div class="field" style="margin-top:13px"><label>Mật khẩu</label><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••"></div><button class="btn luxury-login-btn" type="submit">${icons.key} Đăng nhập hệ thống</button><div class="login-trust-row"><span>GPS</span><span>Payroll</span><span>Inventory</span></div></form>`);
+  $('#auth-root').innerHTML = authLayout(`<form class="auth-card calm-login-card" data-form="login"><div class="auth-logo-mobile"><div class="brand-mark">${icons.tea}</div><strong>RUMI</strong></div><div class="calm-login-head"><span class="eyebrow">RUMI ACCESS</span><span class="login-status-dot">Online</span></div><h2>Đăng nhập hệ thống</h2><p>Vào bảng điều hành để quản lý nhân sự, lịch tuần, bảng công, lương và kho hàng.</p><div class="calm-login-metrics"><span><b>12</b> ca hôm nay</span><span><b>5</b> đang làm</span><span><b>3</b> kho thấp</span></div><div class="field"><label>Tên đăng nhập</label><input name="username" autocomplete="username" required placeholder="Ví dụ: admin"></div><div class="field" style="margin-top:13px"><label>Mật khẩu</label><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••"></div><button class="btn calm-login-btn" type="submit">${icons.key} Đăng nhập</button></form>`);
 }
 function buildNav() {
   const items = state.user.role === 'admin' ? navAdmin : navEmployee;
