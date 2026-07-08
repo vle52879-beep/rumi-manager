@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const VERSION = '6.4.6';
+  const VERSION = '6.5.0';
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   let renderTimer = 0;
   let requestCount = 0;
@@ -279,16 +279,8 @@
   }
 
   function updateVersionLabels() {
-    document.title = 'RUMI Manager 6.2 — Attendance Alerts & Payroll PDF';
-    document.querySelectorAll('.v5-version').forEach((node) => { node.textContent = `V${VERSION}`; });
-    const chip = document.querySelector('.store-chip');
-    if (chip && !chip.querySelector('.v6-version')) {
-      const badge = document.createElement('span');
-      badge.className = 'v6-version';
-      badge.textContent = 'MOTION UI';
-      badge.style.cssText = 'margin-left:auto;padding:4px 7px;border-radius:99px;background:rgba(255,255,255,.08);color:#efc9a8;font-size:7px;font-weight:900;letter-spacing:.1em';
-      chip.appendChild(badge);
-    }
+    document.title = 'RUMI Manager — Premium Sales Edition';
+    document.querySelectorAll('.v5-version,.v6-version').forEach((node) => node.remove());
   }
 
   let attendanceFingerprint = '';

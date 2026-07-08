@@ -751,7 +751,7 @@ def add_people(rows: list[dict], employees: list[dict], key: str = "employee_id"
 
 
 class RumiHandler(BaseHTTPRequestHandler):
-    server_version = "RUMI/6.4.5"
+    server_version = "RUMI/6.5.0"
 
     def log_message(self, fmt, *args):
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -2234,7 +2234,7 @@ class RumiHandler(BaseHTTPRequestHandler):
                 shift_reassignments=lambda: SB.select(TABLES["shift_reassignments"], limit=1, columns="id"),
                 withdrawal_archive=lambda: SB.select(TABLES["withdrawals"], limit=1, columns="id,deleted_at"),
             )
-            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.4.5", "multi_admin_accounts": True, "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
+            return self.ok({"database": "Supabase/PostgreSQL", "project": SB.project_host, "table_prefix": "rumi_", "version": "6.5.0", "multi_admin_accounts": True, "weekly_shift_registration": True, "weekly_double_shift": True, "next_week_registration": True, "notification_bulk_delete": True, "inventory_history_archive": True, "registered_shift_reassignment": True, "max_weekly_hours_cap": 56, "fixed_weekly_shifts": ["09:00-17:00", "17:00-23:00"], "attendance_alerts": True, "payroll_pdf": True, "payroll_logic_v2": True, "operations_ready": True, "schedule_excel": True, "shift_market": True, "security_sessions": True, "smart_attendance": True, "time": now_iso()})
 
         if path == "/api/setup/status":
             return self.ok({"needs_setup": False, "admin_configured": True})

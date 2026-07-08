@@ -6,3 +6,91 @@
 .v642-current-shift{display:grid;gap:4px;padding:16px;border:1px solid rgba(128,83,56,.18);border-radius:16px;background:#fffaf4}.v642-current-shift small{font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#9a725e}.v642-current-shift strong{font-size:18px}.v642-current-shift span{color:#76655b}
 .v642-candidate-list{display:grid;gap:10px;max-height:360px;overflow:auto;padding-right:4px}.v642-candidate{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid rgba(128,83,56,.18);border-radius:16px;background:#fff;cursor:pointer;transition:.2s ease}.v642-candidate:hover{transform:translateY(-1px);border-color:#bd7b54;box-shadow:0 10px 24px rgba(91,54,36,.08)}.v642-candidate.disabled{opacity:.55;cursor:not-allowed;background:#f5f1ed}.v642-candidate input{margin-top:10px;width:18px;height:18px;accent-color:#9b5b3c}.v642-candidate>span{display:grid;gap:7px;flex:1}.v642-candidate small{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:#74645c}
 @media(max-width:720px){.v642-selectable-row{padding:0 8px}.v642-row-main{align-items:flex-start}.v642-row-main .list-value{font-size:11px}.v642-select-all span{display:none}}
+
+/* ================================================================
+   RUMI 6.5.0 — Premium Sales Polish
+   Xóa các dòng chú thích kỹ thuật, nâng cảm giác sản phẩm thương mại.
+   ================================================================ */
+.store-chip.clean-status{
+  min-height:86px;
+  gap:15px;
+  padding:20px 18px;
+  border-radius:24px;
+  background:
+    radial-gradient(circle at 10% 20%,rgba(133,225,178,.17),transparent 28%),
+    linear-gradient(138deg,rgba(255,255,255,.13),rgba(255,255,255,.045));
+  box-shadow:inset 0 1px rgba(255,255,255,.18),0 22px 42px rgba(0,0,0,.16);
+  transform-style:preserve-3d;
+}
+.store-chip.clean-status strong{
+  font-size:18px;
+  line-height:1.08;
+  letter-spacing:-.025em;
+  color:#fff6ec;
+}
+.store-chip.clean-status small,.v5-version,.v6-version{display:none!important}
+.store-chip.clean-status .live-dot{
+  width:12px;height:12px;flex:0 0 auto;
+  background:#6ee0ad;
+  box-shadow:0 0 0 7px rgba(110,224,173,.12),0 0 26px rgba(110,224,173,.55);
+}
+.store-chip.clean-status::before{
+  content:"";position:absolute;right:-42px;top:-46px;width:120px;height:120px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,222,184,.2),transparent 62%);
+  transform:translateZ(-1px);
+}
+.store-chip.clean-status::after{
+  height:1px;background:linear-gradient(90deg,transparent,rgba(255,222,184,.55),transparent);
+}
+.auth-foot{display:none!important}
+.auth-root{background:
+  radial-gradient(820px circle at 18% 10%,rgba(236,169,108,.24),transparent 46%),
+  radial-gradient(700px circle at 94% 18%,rgba(88,136,99,.15),transparent 44%),
+  linear-gradient(135deg,#2b1711 0%,#4b2a1e 44%,#fff8ed 44.2%,#fffaf4 100%);
+}
+.auth-visual.premium-auth{position:relative;overflow:hidden;isolation:isolate}
+.auth-visual.premium-auth::before{
+  content:"";position:absolute;inset:-18% -22% auto auto;width:560px;height:560px;border-radius:50%;
+  background:conic-gradient(from 150deg,rgba(255,214,169,.22),rgba(109,145,112,.15),rgba(194,112,69,.2),rgba(255,214,169,.22));
+  filter:blur(22px);animation:v65Orb 18s ease-in-out infinite alternate;z-index:-1;
+}
+.auth-visual.premium-auth::after{
+  content:"";position:absolute;left:8%;bottom:8%;width:240px;height:240px;border-radius:42px;
+  border:1px solid rgba(255,255,255,.13);background:linear-gradient(145deg,rgba(255,255,255,.11),rgba(255,255,255,.035));
+  transform:rotate(-10deg);filter:blur(.1px);z-index:-1;
+}
+.auth-copy h1{letter-spacing:-.065em;text-shadow:0 18px 48px rgba(0,0,0,.2)}
+.auth-showcase{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;width:min(530px,100%);margin-top:34px;
+  perspective:900px;
+}
+.auth-showcase div{
+  min-height:120px;padding:18px;border:1px solid rgba(255,255,255,.16);border-radius:24px;
+  background:linear-gradient(145deg,rgba(255,255,255,.16),rgba(255,255,255,.055));
+  box-shadow:0 24px 56px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.18);
+  backdrop-filter:blur(18px);transform:rotateX(7deg) rotateY(-6deg);animation:v65FloatCard 8s ease-in-out infinite alternate;
+}
+.auth-showcase div:nth-child(2){animation-delay:.8s;transform:rotateX(7deg) rotateY(2deg) translateY(18px)}
+.auth-showcase div:nth-child(3){animation-delay:1.6s;transform:rotateX(7deg) rotateY(6deg)}
+.auth-showcase span{display:block;color:#e7cdbb;font-size:11px;font-weight:850;letter-spacing:.1em;text-transform:uppercase}
+.auth-showcase strong{display:block;margin-top:13px;color:#fff8ef;font-size:46px;line-height:1;font-weight:950;letter-spacing:-.06em}
+.auth-card{
+  border-radius:34px;
+  box-shadow:0 36px 95px rgba(65,36,23,.22),0 2px 0 rgba(255,255,255,.65) inset;
+}
+.auth-card:before{content:"RUMI ACCESS"!important}
+.auth-card .auth-hint:empty{display:none}
+.hero-card{transform-style:preserve-3d;transition:transform .45s cubic-bezier(.22,1,.36,1),box-shadow .45s ease}
+.hero-card:hover{transform:translateY(-6px) rotateX(1deg) rotateY(-1deg);box-shadow:0 45px 110px rgba(70,37,23,.29),inset 0 1px rgba(255,255,255,.18)}
+.hero-card::after{opacity:.88;animation:v65HeroGlow 10s ease-in-out infinite alternate}
+.stat-card,.card,.table-wrap,.modal{transition:transform .34s cubic-bezier(.22,1,.36,1),box-shadow .34s ease,border-color .34s ease}
+.stat-card:hover,.card:hover{transform:translateY(-5px);border-color:rgba(196,123,81,.2);box-shadow:0 30px 78px rgba(70,37,23,.14),0 1px rgba(255,255,255,.7) inset}
+.btn{position:relative;overflow:hidden;transform:translateZ(0)}
+.btn::after{content:"";position:absolute;inset:-120% -45%;background:linear-gradient(115deg,transparent 38%,rgba(255,255,255,.34),transparent 62%);transform:translateX(-80%) rotate(8deg);transition:transform .62s ease;pointer-events:none}
+.btn:hover::after{transform:translateX(80%) rotate(8deg)}
+.loading-screen{border-radius:28px;background:linear-gradient(145deg,rgba(255,255,255,.76),rgba(255,250,243,.56));box-shadow:0 30px 80px rgba(73,43,28,.1);backdrop-filter:blur(18px)}
+.empty{padding:34px;border-radius:26px;background:linear-gradient(145deg,rgba(255,255,255,.74),rgba(255,249,242,.56));box-shadow:inset 0 1px rgba(255,255,255,.7)}
+@keyframes v65Orb{from{transform:translate3d(0,0,0) rotate(0deg) scale(1)}to{transform:translate3d(-40px,38px,0) rotate(18deg) scale(1.08)}}
+@keyframes v65FloatCard{from{filter:saturate(1);translate:0 0}to{filter:saturate(1.15);translate:0 -10px}}
+@keyframes v65HeroGlow{from{transform:translate3d(0,0,0) scale(1)}to{transform:translate3d(-18px,10px,0) scale(1.04)}}
+@media(max-width:760px){.auth-showcase{display:none}.store-chip.clean-status{min-height:70px}.store-chip.clean-status strong{font-size:15px}}

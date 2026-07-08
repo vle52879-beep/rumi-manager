@@ -1,8 +1,8 @@
 'use strict';
 
-/* RUMI 6.4.6 — bulk admin controls, 56h/week and registered-applicant reassignment. */
+/* RUMI 6.5.0 — bulk admin controls, 56h/week and registered-applicant reassignment. */
 (() => {
-  const VERSION = '6.4.6';
+  const VERSION = '6.5.0';
   const normalize642 = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const parseDate642 = (value) => {
     const [y, m, d] = String(value).slice(0, 10).split('-').map(Number);
@@ -31,7 +31,7 @@
     ['renderInventory', typeof renderInventory], ['renderSchedule', typeof renderSchedule], ['handleForm', typeof handleForm],
   ].filter(([, type]) => type === 'undefined').map(([name]) => name);
   if (missingDependencies642.length) {
-    console.error(`RUMI 6.4.6 không thể khởi tạo: thiếu ${missingDependencies642.join(', ')}`);
+    console.error(`RUMI 6.5.0 không thể khởi tạo: thiếu ${missingDependencies642.join(', ')}`);
     window.RumiV642 = { version: VERSION, ready: false, missing: missingDependencies642 };
     return;
   }

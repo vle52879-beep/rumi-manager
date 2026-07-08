@@ -4,7 +4,7 @@
    keeps all business rules on the Python/PostgreSQL backend. */
 
 window.RumiV5 = (() => {
-  const VERSION = '6.4.6';
+  const VERSION = '6.5.0';
   const pageNode = () => document.querySelector('#page');
   const localISO = (date) => {
     const d = new Date(date);
@@ -155,8 +155,7 @@ window.RumiV5 = (() => {
   }
 
   function setupVersion() {
-    const chip = document.querySelector('.store-chip');
-    if (chip && !chip.querySelector('.v5-version')) chip.insertAdjacentHTML('beforeend', `<span class="v5-version">V${VERSION}</span>`);
+    document.querySelectorAll('.v5-version').forEach((node) => node.remove());
     document.title = 'RUMI Manager 6.2 — Cảnh báo công & PDF lương';
   }
 
