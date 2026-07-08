@@ -259,3 +259,29 @@
 @media(max-width:1360px){.auth-root:has(.studio-auth){grid-template-columns:minmax(520px,1fr) minmax(390px,.8fr)!important}.auth-visual.studio-auth{padding:38px 42px!important}.studio-copy h1{font-size:clamp(38px,4vw,58px)!important}.studio-product{min-height:320px!important}.studio-boba-wrap{transform:scale(.9);transform-origin:right top;right:-8px}}
 @media(max-width:1240px){.auth-root:has(.studio-auth){grid-template-columns:1fr!important}.auth-visual.studio-auth{display:none!important}.auth-panel.studio-panel{min-height:100vh!important}.studio-login-card{width:min(500px,100%)!important}}
 @media(max-width:560px){.studio-login-card{padding:28px 22px!important}.studio-login-card h2{font-size:32px!important}}
+
+
+/* v6.5.5 single-cup focus */
+.studio-product{min-height:340px!important}
+.studio-boba-wrap{position:absolute;right:18px;top:18px;z-index:4;width:260px;height:300px;pointer-events:none;filter:none!important}
+.studio-boba-fx{position:absolute;border-radius:50%;pointer-events:none}
+.studio-boba-fx.fx-a{inset:24px 22px 36px 30px;background:radial-gradient(circle at 48% 38%,rgba(255,226,180,.32),rgba(239,159,95,.12) 42%,transparent 70%);filter:blur(8px)}
+.studio-boba-fx.fx-b{left:68px;top:42px;width:116px;height:116px;background:radial-gradient(circle,rgba(255,255,255,.16),transparent 72%);filter:blur(4px)}
+.studio-boba-orbit{position:absolute;border:1px solid rgba(255,255,255,.18);border-radius:50%;pointer-events:none}
+.studio-boba-orbit.orbit-a{left:34px;top:22px;width:190px;height:220px;transform:rotate(11deg)}
+.studio-boba-orbit.orbit-b{left:18px;top:36px;width:222px;height:198px;transform:rotate(-14deg);opacity:.55}
+.studio-boba-orbit-dot{position:absolute;width:10px;height:10px;border-radius:50%;background:radial-gradient(circle,#ffe8bc,#d79d69);box-shadow:0 0 18px rgba(255,211,155,.45)}
+.studio-boba-orbit-dot.dot-a{left:190px;top:28px}.studio-boba-orbit-dot.dot-b{left:34px;top:212px;width:8px;height:8px;background:radial-gradient(circle,#9ce1b6,#5db584)}
+.studio-boba-shadow{position:absolute;left:72px;bottom:22px;width:122px;height:24px;border-radius:50%;background:radial-gradient(circle,rgba(0,0,0,.34),transparent 72%);filter:blur(10px);opacity:.62}
+.studio-boba-cup{position:absolute;left:72px;top:42px;width:126px;height:196px;border-radius:20px 20px 30px 30px/20px 20px 38px 38px;background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(255,255,255,.08));border:1px solid rgba(255,255,255,.4);backdrop-filter:blur(7px);overflow:hidden;transform:rotate(-2deg);box-shadow:0 30px 48px rgba(0,0,0,.25),inset 0 1px rgba(255,255,255,.3)}
+.studio-boba-cup:before{content:"";position:absolute;left:14px;right:14px;top:12px;height:10px;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.14));opacity:.92}
+.studio-boba-lid{position:absolute;left:-8px;top:12px;width:142px;height:16px;border-radius:999px;background:linear-gradient(180deg,#faf1e2,#ecdcc7);box-shadow:0 8px 18px rgba(48,18,5,.16)}
+.studio-boba-straw{position:absolute;top:-24px;width:10px;height:112px;border-radius:999px;background:linear-gradient(180deg,#f2cfb1,#b96c43);box-shadow:0 6px 12px rgba(0,0,0,.16)}
+.studio-boba-straw.straw-a{left:74px;transform:rotate(12deg)}
+.studio-boba-milk{position:absolute;left:0;right:0;top:26px;height:102px;background:linear-gradient(180deg,#f5e5ce,#efb57e)}
+.studio-boba-liquid{position:absolute;left:0;right:0;bottom:0;height:62px;background:linear-gradient(180deg,#5b331f,#2d1710)}
+.studio-boba-highlight{position:absolute;left:18px;top:38px;width:20px;height:124px;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.08));opacity:.9}
+.studio-boba-pearl{position:absolute;bottom:16px;width:16px;height:16px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#6a4533,#23130f 72%);box-shadow:0 4px 8px rgba(0,0,0,.22)}
+.studio-boba-pearl.p1{left:24px;bottom:18px}.studio-boba-pearl.p2{left:50px;bottom:26px}.studio-boba-pearl.p3{left:76px;bottom:16px}.studio-boba-pearl.p4{left:96px;bottom:28px}.studio-boba-pearl.p5{left:58px;bottom:44px}
+.studio-boba-chip,.studio-boba-glow,.studio-boba-straw.straw-b{display:none!important}
+@media(max-width:1360px){.studio-boba-wrap{right:0;top:8px;transform:scale(.92);transform-origin:right top}}
