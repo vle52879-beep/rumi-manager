@@ -171,6 +171,24 @@ function authLayout(card) {
           <div class="studio-row"><em></em><strong>Lịch tuần đã duyệt</strong><span>ổn định</span></div>
           <div class="studio-row"><em></em><strong>Chấm công GPS hợp lệ</strong><span>98%</span></div>
         </div>
+        <div class="studio-boba-wrap">
+          <div class="studio-boba-shadow"></div>
+          <div class="studio-boba-glow"></div>
+          <div class="studio-boba-cup">
+            <span class="studio-boba-lid"></span>
+            <span class="studio-boba-straw straw-a"></span>
+            <span class="studio-boba-straw straw-b"></span>
+            <span class="studio-boba-liquid"></span>
+            <span class="studio-boba-milk"></span>
+            <span class="studio-boba-highlight"></span>
+            <span class="studio-boba-pearl p1"></span>
+            <span class="studio-boba-pearl p2"></span>
+            <span class="studio-boba-pearl p3"></span>
+            <span class="studio-boba-pearl p4"></span>
+            <span class="studio-boba-pearl p5"></span>
+          </div>
+          <div class="studio-boba-chip">Signature milk tea</div>
+        </div>
       </div>
     </div>
   </section><section class="auth-panel studio-panel">${card}</section>`;

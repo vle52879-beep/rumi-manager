@@ -213,3 +213,49 @@
 @keyframes studioBar{from{transform:scaleY(.88);filter:saturate(.95)}to{transform:scaleY(1.04);filter:saturate(1.12)}}
 @media(max-width:1240px){.auth-root:has(.studio-auth){grid-template-columns:1fr!important}.auth-visual.studio-auth{display:none!important}.auth-panel.studio-panel{min-height:100vh!important}.studio-login-card{width:min(520px,100%)!important}}
 @media(max-width:560px){.auth-panel.studio-panel{padding:22px!important}.studio-login-card{padding:30px 22px!important;border-radius:26px!important}.studio-login-card h2{font-size:34px!important}.studio-login-foot{display:none}}
+
+
+/* v6.5.4 login polish */
+.auth-root:has(.studio-auth){grid-template-columns:minmax(580px,1fr) minmax(420px,.82fr)!important}
+.auth-visual.studio-auth{padding:44px 52px!important}
+.studio-brand .brand-mark{width:56px!important;height:56px!important;border-radius:20px!important}
+.studio-brand strong{font-size:24px!important;letter-spacing:.14em!important}
+.studio-brand span{font-size:11px!important}
+.studio-content{gap:22px!important;max-width:700px!important;margin:28px 0 10px!important}
+.studio-copy{max-width:620px!important}
+.studio-copy h1{margin:16px 0 14px!important;max-width:610px!important;font-size:clamp(42px,4vw,66px)!important;line-height:1.01!important}
+.studio-copy p{max-width:560px!important;font-size:15px!important;line-height:1.6!important}
+.studio-actions{margin-top:18px!important}
+.studio-actions span{height:34px!important;padding:0 13px!important;font-size:11px!important}
+.studio-product{position:relative!important;width:min(610px,100%)!important;min-height:360px!important;perspective:1400px!important}
+.studio-window{width:min(500px,84%)!important;padding:18px!important;border-radius:28px!important;transform:rotateX(3deg) rotateY(-7deg) scale(.96)!important;transform-origin:left bottom!important}
+.studio-window-head{font-size:9px!important}
+.studio-window-head b{font-size:10px!important}
+.studio-stats{gap:10px!important;margin-top:14px!important}
+.studio-stats div{padding:14px!important;border-radius:18px!important}
+.studio-stats b{font-size:30px!important}.studio-stats span{font-size:9px!important}
+.studio-chart{height:100px!important;margin-top:14px!important;padding:14px!important;border-radius:20px!important}
+.studio-row{padding:10px 12px!important}.studio-row strong{font-size:11px!important}.studio-row span{font-size:10px!important}
+.studio-boba-wrap{position:absolute;right:6px;top:8px;z-index:3;width:250px;height:318px;pointer-events:none;filter:drop-shadow(0 32px 46px rgba(0,0,0,.34))}
+.studio-boba-shadow{position:absolute;left:54px;bottom:8px;width:150px;height:26px;border-radius:50%;background:radial-gradient(circle,rgba(0,0,0,.38),transparent 72%);filter:blur(8px);opacity:.55}
+.studio-boba-glow{position:absolute;inset:24px 18px 42px 18px;border-radius:45% 45% 38% 38%;background:radial-gradient(circle at 45% 22%,rgba(255,244,207,.38),rgba(255,186,114,.24) 42%,transparent 72%)}
+.studio-boba-cup{position:absolute;left:48px;top:20px;width:152px;height:232px;border-radius:24px 24px 34px 34px/24px 24px 42px 42px;background:linear-gradient(180deg,rgba(255,255,255,.22),rgba(255,255,255,.07));border:1px solid rgba(255,255,255,.42);backdrop-filter:blur(7px);overflow:hidden;transform:rotate(-3deg)}
+.studio-boba-cup:before{content:"";position:absolute;left:12px;right:12px;top:10px;height:12px;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.7),rgba(255,255,255,.12));opacity:.9}
+.studio-boba-lid{position:absolute;left:-8px;top:14px;width:168px;height:18px;border-radius:999px;background:linear-gradient(180deg,#f9f0de,#e9dac5);box-shadow:0 8px 18px rgba(48,18,5,.16)}
+.studio-boba-straw{position:absolute;top:-28px;width:11px;height:126px;border-radius:999px;background:linear-gradient(180deg,#f2cfb1,#b96c43);box-shadow:0 6px 12px rgba(0,0,0,.16)}
+.studio-boba-straw.straw-a{left:84px;transform:rotate(8deg)}.studio-boba-straw.straw-b{left:112px;top:-18px;height:110px;transform:rotate(-8deg);opacity:.88}
+.studio-boba-milk{position:absolute;left:0;right:0;top:28px;height:124px;background:linear-gradient(180deg,#f4e4cb,#ebb178)}
+.studio-boba-liquid{position:absolute;left:0;right:0;bottom:0;height:74px;background:linear-gradient(180deg,#5d341f,#33170f)}
+.studio-boba-highlight{position:absolute;left:18px;top:42px;width:24px;height:144px;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.08));filter:blur(.2px);opacity:.88}
+.studio-boba-pearl{position:absolute;bottom:18px;width:18px;height:18px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#6a4533,#23130f 72%);box-shadow:0 4px 8px rgba(0,0,0,.22)}
+.studio-boba-pearl.p1{left:28px;bottom:18px}.studio-boba-pearl.p2{left:58px;bottom:26px}.studio-boba-pearl.p3{left:88px;bottom:16px}.studio-boba-pearl.p4{left:112px;bottom:30px}.studio-boba-pearl.p5{left:70px;bottom:46px}
+.studio-boba-chip{position:absolute;right:4px;top:6px;padding:10px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.12);backdrop-filter:blur(12px);color:#fff6ea;font-size:11px;font-weight:900;letter-spacing:.04em;box-shadow:0 16px 40px rgba(0,0,0,.2)}
+.studio-login-card{width:min(440px,100%)!important;padding:38px!important;border-radius:28px!important}
+.studio-login-card h2{font-size:36px!important}
+.studio-login-desc{font-size:13px!important;margin-bottom:20px!important}
+.studio-login-card input{min-height:52px!important;font-size:14px!important}
+.studio-login-btn{min-height:54px!important;margin-top:16px!important}
+.studio-login-foot{margin-top:14px!important}
+@media(max-width:1360px){.auth-root:has(.studio-auth){grid-template-columns:minmax(520px,1fr) minmax(390px,.8fr)!important}.auth-visual.studio-auth{padding:38px 42px!important}.studio-copy h1{font-size:clamp(38px,4vw,58px)!important}.studio-product{min-height:320px!important}.studio-boba-wrap{transform:scale(.9);transform-origin:right top;right:-8px}}
+@media(max-width:1240px){.auth-root:has(.studio-auth){grid-template-columns:1fr!important}.auth-visual.studio-auth{display:none!important}.auth-panel.studio-panel{min-height:100vh!important}.studio-login-card{width:min(500px,100%)!important}}
+@media(max-width:560px){.studio-login-card{padding:28px 22px!important}.studio-login-card h2{font-size:32px!important}}
