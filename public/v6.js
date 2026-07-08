@@ -80,7 +80,7 @@
 
   function addAuthArt() {
     const visual = document.querySelector('.auth-visual');
-    if (!visual || visual.dataset.v6Enhanced) return;
+    if (!visual || visual.classList.contains('studio-auth') || visual.dataset.v6Enhanced) return;
     visual.dataset.v6Enhanced = '1';
     visual.insertAdjacentHTML('beforeend', `
       <span class="v6-auth-bubble b1" aria-hidden="true"></span>
